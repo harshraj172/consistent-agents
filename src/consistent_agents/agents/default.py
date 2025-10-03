@@ -3,14 +3,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Dict
 
-from consistent_agent.agents.base import (
+from consistent_agents.agents.base import (
     BaseAgent,
     BaseAgentConfig,
     FormatError,
     Submitted
 )
-from consistent_agent.models import Model
-from consistent_agent.environments import Environment
+from consistent_agents.models import Model
+from consistent_agents.environments import Environment
 
 
 @dataclass

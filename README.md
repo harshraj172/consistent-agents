@@ -1,2 +1,9 @@
 # consistent-agents
 Attempt to evaluate the consistency of AI Agents.
+
+## Test
+Test run with:
+```bash
+pip install -e .
+python3 -m src.consistent_agents.eval src/consistent_agents/config/test.yaml
+```
