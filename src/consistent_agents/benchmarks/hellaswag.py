@@ -35,6 +35,7 @@ class HellaSwagBenchmark(BaseBenchmark):
         for i, choice in enumerate(choices):
             prompt += f"{chr(65 + i)}. {choice}\n"
         prompt += "\nAnswer:"
+        prompt += "\n\n Answer this by printing the correct sentence in the format 'The answer is '<sentence>''."
         return prompt
     
     def iter(self) -> Iterator[Dict[str, Any]]:
@@ -45,6 +46,7 @@ class HellaSwagBenchmark(BaseBenchmark):
         for example in self.dataset:
             yield {
                 "prompt": self.format_prompt(example["ctx"], example["endings"]),
+                "label": example["label"]
             }
     
     def score(self, predictions: List[int], references: List[int]) -> Dict[str, float]:

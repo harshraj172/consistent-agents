@@ -1,45 +1,37 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict
-import logging
+from dataclasses import dataclass, field
+from typing import Any, Dict, List
 
 
-class BasePerturbation(ABC):
-    """Base class for all perturbation types."""
+@dataclass
+class BaseModelConfig:
+    """Configuration for base model."""
+    model_name: str
+    model_kwargs: Dict[str, Any] = field(default_factory=dict)
+
+
+class BaseModel(ABC):
+    """Abstract base class for all model implementations."""
     
-    def __init__(self, name: str = "", **kwargs):
-        """
-        Initialize the perturbation.
-        
-        Args:
-            name: Name identifier for the perturbation
-            **kwargs: Additional configuration parameters
-        """
-        self.name = name or self.__class__.__name__
-        self.config = kwargs
-        self.logger = logging.getLogger(f"perturbation.{self.name}")
+    def __init__(self, **kwargs):
+        self.config = self._create_config(**kwargs)
+        self.n_calls = 0
+        self.cost = 0.0
     
     @abstractmethod
-    def apply(self, text: str, **kwargs) -> str:
-        """
-        Apply the perturbation to the input text.
-        
-        Args:
-            text: Input text to perturb
-            **kwargs: Additional parameters for the perturbation
-            
-        Returns:
-            str: Perturbed text with same semantics but different syntax
-        """
+    def _create_config(self, **kwargs) -> BaseModelConfig:
+        """Create and return model-specific configuration."""
         pass
     
-    def __call__(self, text: str, **kwargs) -> str:
-        """Allow perturbation to be called as a function."""
-        return self.apply(text, **kwargs)
+    @abstractmethod
+    def query(self, messages: List[Dict[str, str]], **kwargs) -> Dict[str, Any]:
+        """Query the model with messages"""
+        pass
     
-    def get_config(self) -> Dict[str, Any]:
-        """Get perturbation configuration."""
+    def get_template_vars(self) -> Dict[str, Any]:
+        """Return variables for templates/logging."""
         return {
-            "name": self.name,
-            "type": self.__class__.__name__,
-            **self.config
+            "model_name": self.config.model_name,
+            "n_model_calls": self.n_calls,
+            "model_cost": self.cost,
         }

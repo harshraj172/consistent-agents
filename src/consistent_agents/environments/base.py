@@ -34,10 +34,9 @@ class BaseEnvironment(ABC):
         """Execute a command in the environment."""
         pass
     
-    @abstractmethod
     def is_healthy(self) -> bool:
         """Check if the environment is healthy and responsive."""
-        pass
+        True
     
     def restart(self) -> bool:
         """Restart the environment by stopping and starting it."""

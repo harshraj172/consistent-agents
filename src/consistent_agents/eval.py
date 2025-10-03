@@ -1,92 +1,30 @@
 from __future__ import annotations
 
 import yaml
-import importlib
 import json
 import random
 import sys
-from dataclasses import dataclass, asdict
+from tqdm.auto import tqdm
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-
-# -----------------------------
-# Data models for results
-# -----------------------------
-
-
-@dataclass
-class BenchmarkItem:
-    id: str
-    prompt: str
-    label: Optional[str] = None
+from consistent_agents.data_models import (BenchmarkItem,
+                                           EvalConfig, 
+                                           EvalResult, 
+                                           ExampleResult)
+from consistent_agents.utils import (resolve_object, 
+                                    maybe_instantiate,
+                                    compute_consistency)
 
 
-@dataclass
-class EvalConfig:
-    n_perturbations: int = 5
-    seed: int = 42
-
-
-@dataclass
-class ExampleResult:
-    id: str
-    base_output: str
-    perturbed_outputs: List[Dict[str, Any]]
-    consistent: bool
-
-
-@dataclass
-class EvalResult:
-    config: Dict[str, Any]
-    total: int
-    consistent: int
-    consistency_rate: float
-    examples: List[ExampleResult]
-
-
-# -----------------------------
-# Helpers
-# -----------------------------
-
-
-def _resolve_object(dotted: str) -> Any:
-    mod_path, _, attr = dotted.partition(":")
-    if not attr:
-        raise ValueError("Expected dotted path in format 'module.sub:attr'")
-    mod = importlib.import_module(mod_path)
-    return getattr(mod, attr)
-
-
-def _maybe_instantiate(obj: Any, params: Optional[Dict[str, Any]] = None) -> Any:
-    if isinstance(obj, type):
-        return obj(**(params or {}))
-    return obj
-
-
-def _normalize_text(s: str) -> str:
-    return " ".join(str(s).strip().split()).lower()
-
-
-def compute_consistency(base: str, perturbed: List[str]) -> Tuple[bool, List[bool]]:
-    base_n = _normalize_text(base)
-    flags = [(_normalize_text(p) == base_n) for p in perturbed]
-    return all(flags), flags
-
-
-# -----------------------------
-# Benchmark loading
-# -----------------------------
-
-
+# benchmark
 def _iter_benchmark_examples(benchmark_obj: Any) -> Iterable[Dict[str, Any]]:
-    # Support either .iter() or __iter__ on benchmark
     if hasattr(benchmark_obj, "iter") and callable(getattr(benchmark_obj, "iter")):
         return benchmark_obj.iter()
     if hasattr(benchmark_obj, "__iter__"):
         return iter(benchmark_obj)
     raise TypeError("Benchmark object must define an `iter()` or `__iter__` method")
-
 
 def load_benchmark_from_config(bm_cfg: Dict[str, Any]) -> List[BenchmarkItem]:
     """Create a benchmark instance from config and return items."""
@@ -95,14 +33,13 @@ def load_benchmark_from_config(bm_cfg: Dict[str, Any]) -> List[BenchmarkItem]:
     if not path:
         raise ValueError("benchmark.path must be provided in config.yaml")
 
-    obj = _resolve_object(path)
-    benchmark = _maybe_instantiate(obj, params)
+    obj = resolve_object(path)
+    benchmark = maybe_instantiate(obj, params)
     if hasattr(benchmark, "load") and callable(getattr(benchmark, "load")):
         benchmark.load()
 
     items: List[BenchmarkItem] = []
-    for i, ex in enumerate(_iter_benchmark_examples(benchmark)):
-        # Expect examples to include a prompt-like field
+    for ex_id, ex in enumerate(_iter_benchmark_examples(benchmark)):
         prompt = (
             ex.get("prompt")
             or ex.get("input")
@@ -111,17 +48,11 @@ def load_benchmark_from_config(bm_cfg: Dict[str, Any]) -> List[BenchmarkItem]:
         )
         if prompt is None:
             continue
-        ex_id = str(ex.get("id") or i)
         label = ex.get("label") if isinstance(ex.get("label"), (str, int)) else None
         items.append(BenchmarkItem(id=ex_id, prompt=str(prompt), label=str(label) if label is not None else None))
     return items
 
-
-# -----------------------------
-# Perturbations
-# -----------------------------
-
-
+# perturbation
 def _instantiate_perturbations(cfg_list: List[Dict[str, Any]]) -> List[Callable[[str], str]]:
     perts: List[Callable[[str], str]] = []
     for pcfg in cfg_list:
@@ -129,8 +60,8 @@ def _instantiate_perturbations(cfg_list: List[Dict[str, Any]]) -> List[Callable[
         params = pcfg.get("params", {})
         if not path:
             continue
-        obj = _resolve_object(path)
-        inst = _maybe_instantiate(obj, params)
+        obj = resolve_object(path)
+        inst = maybe_instantiate(obj, params)
         if hasattr(inst, "apply") and callable(getattr(inst, "apply")):
             perts.append(lambda text, inst=inst: inst.apply(text))
         elif callable(inst):
@@ -155,60 +86,39 @@ def generate_perturbations(
         fn = perturb_fns[i % len(perturb_fns)]
         name = getattr(fn, "__name__", getattr(getattr(fn, "__self__", object()), "__class__", type("_", (), {})).__name__)
         perturbed = fn(text)
-        if rng.random() < -1.0:  # reserved hook for future randomization
-            pass
         results.append((name, perturbed))
     return results
 
 
-# -----------------------------
-# Agent resolution
-# -----------------------------
-
-
+# agent
 def resolve_agent_callable(cfg: Dict[str, Any]) -> Callable[[str], str]:
-    """Resolve agent from config into a callable(prompt) -> str.
-
-    Supports either a function or a class with a `run(task: str) -> Any` method.
-    If model/environment are configured, they will be instantiated and passed
-    to the agent class constructor.
-    """
+    """Resolve agent from config into a callable(prompt)"""
     path = cfg.get("path")
     params = cfg.get("params", {})
     if not path:
         raise ValueError("agent.path must be provided in config.yaml")
 
-    obj = _resolve_object(path)
-
-    # Direct callable (function) or simple builtin types like `str`
-    simple_builtin_types = (str, int, float, bool)
-    if callable(obj) and (not isinstance(obj, type) or obj in simple_builtin_types):
-        return lambda prompt: str(obj(prompt, **params))  # type: ignore[misc]
-
-    # Class with run(str)->Any
+    obj = resolve_object(path)
+    
     if isinstance(obj, type):
-        # Optional model/environment
         model = None
         env = None
         if cfg.get("model"):
             mpath = cfg["model"].get("path")
             mparams = cfg["model"].get("params", {})
             if mpath:
-                model = _maybe_instantiate(_resolve_object(mpath), mparams)
+                model = maybe_instantiate(resolve_object(mpath), mparams)
+        else:
+            raise ValueError("agent.model.path must be provided in config.yaml")
         if cfg.get("environment"):
             epath = cfg["environment"].get("path")
             eparams = cfg["environment"].get("params", {})
             if epath:
-                env = _maybe_instantiate(_resolve_object(epath), eparams)
-
-        try:
-            if model is not None or env is not None:
-                instance = obj(model=model, env=env, **params)
-            else:
-                instance = obj(**params)
-        except TypeError:
-            # Fallback to zero-arg instantiation
-            instance = obj()
+                env = maybe_instantiate(resolve_object(epath), eparams)
+        else:
+            raise ValueError("agent.environment.path must be provided in config.yaml")
+        
+        instance = obj(model=model, env=env, **params)
 
         if hasattr(instance, "run") and callable(getattr(instance, "run")):
             def _runner(prompt: str) -> str:
@@ -224,10 +134,7 @@ def resolve_agent_callable(cfg: Dict[str, Any]) -> Callable[[str], str]:
     )
 
 
-# -----------------------------
 # Evaluation loop
-# -----------------------------
-
 
 def evaluate(
     items: List[BenchmarkItem],
@@ -238,7 +145,7 @@ def evaluate(
     examples: List[ExampleResult] = []
     consistent_count = 0
 
-    for item in items:
+    for item in tqdm(items, desc="Evaluating", unit="ex"):
         base_output = agent_fn(item.prompt)
         perts = generate_perturbations(
             item.prompt,
@@ -254,7 +161,6 @@ def evaluate(
                 "text": p_text,
                 "output": out,
             })
-
         ok, flags = compute_consistency(
             base_output, [po["output"] for po in perturbed_outputs]
         )
@@ -293,7 +199,6 @@ def _load_config(config_path: str | Path) -> Dict[str, Any]:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    # Expect config path as first arg or default to ./config.yaml
     cfg_path = Path(argv[0]) if argv else Path("config.yaml")
     raw_cfg = _load_config(cfg_path)
     eval_cfg = EvalConfig(
