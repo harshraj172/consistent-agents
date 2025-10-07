@@ -50,8 +50,8 @@ class AgentConfig:
     )
     format_error_template: str = "Please always provide EXACTLY ONE action in triple backticks."
     action_observation_template: str = "Observation: {{output}}"
-    step_limit: int = 0
-    cost_limit: float = 0
+    step_limit: int = 10
+    cost_limit: float = 2
 
 
 @dataclass
@@ -170,7 +170,8 @@ class DefaultAgent:
     
     def has_finished(self, output: Dict[str, str]) -> None:
         """Check if the agent has completed its task."""
-        lines = output.get("output", "").lstrip().splitlines(keepends=True)
+        # lines = output.get("output", "").lstrip().splitlines(keepends=True)
         # if lines and lines[0].strip() in ["COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"]:
+        lines = output.get("output", "").lstrip()
         if lines and "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in ''.join(lines):
             raise Submitted("".join(lines[1:]))
