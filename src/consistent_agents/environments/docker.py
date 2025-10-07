@@ -11,7 +11,7 @@ from consistent_agents.environments.base import BaseEnvironment
 
 @dataclass
 class DockerEnvironmentConfig:
-    image: str
+    image: str = "python:3.10-slim"
     cwd: str = "/"
     """Working directory in which to execute commands."""
     env: dict[str, str] = field(default_factory=dict)
