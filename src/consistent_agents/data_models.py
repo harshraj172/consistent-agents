@@ -22,13 +22,14 @@ class ExampleResult:
     id: str
     base_output: str
     perturbed_outputs: List[Dict[str, Any]]
-    consistent: bool
-
+    consistency: int
+    accuracy: int
+    
 
 @dataclass
 class EvalResult:
     config: Dict[str, Any]
     total: int
-    consistent: int
-    consistency_rate: float
+    consistency: int
+    accuracy: float
     examples: List[ExampleResult]

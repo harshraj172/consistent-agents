@@ -14,8 +14,8 @@ from consistent_agents.data_models import (BenchmarkItem,
                                            EvalResult, 
                                            ExampleResult)
 from consistent_agents.utils import (resolve_object, 
-                                    maybe_instantiate,
-                                    compute_consistency)
+                                    maybe_instantiate)
+from consistent_agents.benchmarks.base import BaseBenchmark
 
 
 # benchmark
@@ -26,7 +26,7 @@ def _iter_benchmark_examples(benchmark_obj: Any) -> Iterable[Dict[str, Any]]:
         return iter(benchmark_obj)
     raise TypeError("Benchmark object must define an `iter()` or `__iter__` method")
 
-def load_benchmark_from_config(bm_cfg: Dict[str, Any]) -> List[BenchmarkItem]:
+def load_benchmark_from_config(bm_cfg: Dict[str, Any]) -> Tuple[BaseBenchmark, List[BenchmarkItem]]:
     """Create a benchmark instance from config and return items."""
     path = bm_cfg.get("path")
     params = bm_cfg.get("params", {})
@@ -50,7 +50,7 @@ def load_benchmark_from_config(bm_cfg: Dict[str, Any]) -> List[BenchmarkItem]:
             continue
         label = ex.get("label") if isinstance(ex.get("label"), (str, int)) else None
         items.append(BenchmarkItem(id=ex_id, prompt=str(prompt), label=str(label) if label is not None else None))
-    return items
+    return benchmark, items
 
 # perturbation
 def _instantiate_perturbations(cfg_list: List[Dict[str, Any]]) -> List[Callable[[str], str]]:
@@ -73,7 +73,7 @@ def _instantiate_perturbations(cfg_list: List[Dict[str, Any]]) -> List[Callable[
 
 def generate_perturbations(
     text: str,
-    perturb_fns: List[Callable[[str], str]],
+    perturb_fns: List[Tuple[Callable[[str], str]], Dict],
     n: int,
     seed: int,
 ) -> List[Tuple[str, str]]:
@@ -84,7 +84,7 @@ def generate_perturbations(
     results: List[Tuple[str, str]] = []
     for i in range(n):
         fn = perturb_fns[i % len(perturb_fns)]
-        name = getattr(fn, "__name__", getattr(getattr(fn, "__self__", object()), "__class__", type("_", (), {})).__name__)
+        fn, name = fn[0], fn[1]
         perturbed = fn(text)
         results.append((name, perturbed))
     return results
@@ -135,15 +135,15 @@ def resolve_agent_callable(cfg: Dict[str, Any]) -> Callable[[str], str]:
 
 
 # Evaluation loop
-
 def evaluate(
     items: List[BenchmarkItem],
     agent_fn: Callable[[str], str],
+    score_fn: Callable[[str], dict],
     config: EvalConfig,
     perturb_fns: List[Callable[[str], str]],
 ) -> EvalResult:
     examples: List[ExampleResult] = []
-    consistent_count = 0
+    consistent_count, correct_count, total = 0, 0, 0
 
     for item in tqdm(items, desc="Evaluating", unit="ex"):
         base_output = agent_fn(item.prompt)
@@ -161,31 +161,29 @@ def evaluate(
                 "text": p_text,
                 "output": out,
             })
-        ok, flags = compute_consistency(
+        result = score_fn(
             base_output, [po["output"] for po in perturbed_outputs]
         )
-        for f, po in zip(flags, perturbed_outputs):
-            po["equal_to_base"] = f
-
-        if ok:
-            consistent_count += 1
-
+        consistent_count_per_row, correct_count_per_row, total_per_row = \
+            result["consistent_count"], result["correct_count"], result["total"]
+        correct_count += correct_count_per_row
+        consistent_count += consistent_count_per_row
+        total += total_per_row
         examples.append(
             ExampleResult(
                 id=item.id,
                 base_output=base_output,
                 perturbed_outputs=perturbed_outputs,
-                consistent=ok,
+                consistency=consistent_count/total_per_row,
+                accuracy=correct_count/total_per_row,
             )
         )
 
-    total = len(items)
-    rate = (consistent_count / total) if total else 0.0
     return EvalResult(
         config=asdict(config),
+        consistency=consistent_count/total,
+        accuracy=correct_count/total,
         total=total,
-        consistent=consistent_count,
-        consistency_rate=rate,
         examples=examples,
     )
 
@@ -207,8 +205,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     # Benchmark
-    items = load_benchmark_from_config(raw_cfg.get("benchmark", {}))
-
+    benchmark, items = load_benchmark_from_config(raw_cfg.get("benchmark", {}))
+    score_fn = getattr(benchmark, "score")
+    
     # Agent
     agent_fn = resolve_agent_callable(raw_cfg.get("agent", {}))
 
@@ -217,21 +216,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     if isinstance(perturb_cfgs, dict):
         perturb_cfgs = [perturb_cfgs]
     perturb_fns = _instantiate_perturbations(perturb_cfgs)
+    perturb_fns = [(fn, cfg) for fn, cfg in zip(perturb_fns, perturb_cfgs)]
 
     # Evaluate
-    result = evaluate(items, agent_fn, eval_cfg, perturb_fns)
+    result = evaluate(items, agent_fn, score_fn, eval_cfg, perturb_fns)
 
     payload = {
         "config": result.config,
         "total": result.total,
-        "consistent": result.consistent,
-        "consistency_rate": result.consistency_rate,
+        "consistency": result.consistency,
+        "accuracy": result.accuracy,
         "examples": [
             {
                 "id": ex.id,
                 "base_output": ex.base_output,
                 "perturbed_outputs": ex.perturbed_outputs,
-                "consistent": ex.consistent,
+                "consistency": ex.consistency,
+                "accuracy": ex.accuracy,
             }
             for ex in result.examples
         ],
