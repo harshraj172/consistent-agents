@@ -95,7 +95,8 @@ class DefaultAgent:
         self.model = model
         self.env = env
         self.extra_template_vars: Dict[str, Any] = {}
-    
+        self.steps: int = 0  
+
     def render_template(self, template: str, **kwargs) -> str:
         """Render a Jinja2 template with combined context variables."""
         template_vars = asdict(self.config)
@@ -111,10 +112,17 @@ class DefaultAgent:
         """Run the agent until completion."""
         self.extra_template_vars |= {"task": task, **kwargs}
         self.messages = []
+        self.steps = 0  
         self.initialize_messages()
         while True:
             try:
+                has_reached_step_limit = self.steps >= self.config.step_limit
+                if has_reached_step_limit:
+                    raise Submitted()
+                    
                 self.step()
+                self.steps += 1
+
             except NonTerminatingException as e:
                 self.add_message("user", str(e))
             except TerminatingException as e:
