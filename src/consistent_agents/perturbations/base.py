@@ -18,7 +18,6 @@ class BasePerturbation(ABC):
         self.config = kwargs
         self.logger = logging.getLogger(f"perturbation.{self.name}")
     
-    @abstractmethod
     def apply(self, text: str, **kwargs) -> str:
         """
         Apply the perturbation to the input text.
@@ -30,7 +29,7 @@ class BasePerturbation(ABC):
         Returns:
             str: Perturbed text with same semantics but different syntax
         """
-        pass
+        return text
     
     def __call__(self, text: str, **kwargs) -> str:
         """Allow perturbation to be called as a function."""
