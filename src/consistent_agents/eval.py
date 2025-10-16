@@ -81,10 +81,9 @@ def generate_perturbations(
     rng = random.Random(seed)
     if not perturb_fns:
         return []
+    perturb_fns = perturb_fns*n
     results: List[Tuple[str, str]] = []
-    for i in range(n):
-        fn = perturb_fns[i % len(perturb_fns)]
-        fn, name = fn[0], fn[1]
+    for (fn, name) in perturb_fns:
         perturbed = fn(text)
         results.append((name, perturbed))
     return results
@@ -162,7 +161,7 @@ def evaluate(
                 "output": out,
             })
         result = score_fn(
-            base_output, [po["output"] for po in perturbed_outputs]
+            item.id, base_output, [po["output"] for po in perturbed_outputs]
         )
         consistent_count_per_row, correct_count_per_row, total_per_row = \
             result["consistent_count"], result["correct_count"], result["total"]
@@ -174,8 +173,8 @@ def evaluate(
                 id=item.id,
                 base_output=base_output,
                 perturbed_outputs=perturbed_outputs,
-                consistency=consistent_count/total_per_row,
-                accuracy=correct_count/total_per_row,
+                consistency=consistent_count_per_row/total_per_row,
+                accuracy=correct_count_per_row/total_per_row,
             )
         )
 
@@ -199,8 +198,9 @@ def _load_config(config_path: str | Path) -> Dict[str, Any]:
 def main(argv: Optional[List[str]] = None) -> int:
     cfg_path = Path(argv[0]) if argv else Path("config.yaml")
     raw_cfg = _load_config(cfg_path)
+    n_perturbations = int(raw_cfg.get("eval", {}).get("n_perturbations", 5))
     eval_cfg = EvalConfig(
-        n_perturbations=int(raw_cfg.get("eval", {}).get("n_perturbations", 5)),
+        n_perturbations=n_perturbations,
         seed=int(raw_cfg.get("eval", {}).get("seed", 42)),
     )
 

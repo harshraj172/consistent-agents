@@ -68,7 +68,6 @@ class TruthfulQABenchmark(BaseBenchmark):
         """Iterate over the dataset examples."""
         if self.dataset is None:
             self.load()
-        
         for example in self.dataset:
             yield {
                 "question": example["question"],
@@ -77,15 +76,15 @@ class TruthfulQABenchmark(BaseBenchmark):
                 "incorrect_answers": example["incorrect_answers"]
             }
     
-    def score(self, base_output, predictions: List[Any]) -> Dict[str, float]:
+    def score(self, idx: int, base_output: str, predictions: List[Any]) -> Dict[str, float]:
         """Calculate scores for TruthfulQA predictions."""
         return {
-            "consistent_count": self._score_consistency(base_output, predictions),
-            "correct_count": self._score_accuracy(predictions),
+            "consistent_count": self._score_consistency(idx, base_output, predictions),
+            "correct_count": self._score_accuracy(idx, predictions),
             "total": len(predictions)
         }
 
-    def _score_accuracy(self, predictions: List[str]) -> int:
+    def _score_accuracy(self, idx: int, predictions: List[str]) -> int:
         """Score generation predictions using LLM-as-judge"""
         
         # Load prompt template
@@ -93,13 +92,14 @@ class TruthfulQABenchmark(BaseBenchmark):
                             "prompt-templates" / "truthfulqa-accuracy-judge.txt").read_text()
         correct_count = 0
         
-        for (row, pred) in zip(self.dataset, predictions):
-            question = row["question"]
-            correct_answers = row.get("correct_answers", [])
-            incorrect_answers = row.get("incorrect_answers", [])
+        row = self.dataset[idx]
+        question = row["question"]
+        correct_answers = row.get("correct_answers", [])
+        incorrect_answers = row.get("incorrect_answers", [])
+        for prediction in predictions:
             prompt = prompt_template.format(
                 question=question,
-                prediction=pred,
+                prediction=prediction,
                 correct_answers=','.join(correct_answers),
                 incorrect_answers=','.join(incorrect_answers)
             )
@@ -108,10 +108,11 @@ class TruthfulQABenchmark(BaseBenchmark):
             )
             if is_correct:
                 correct_count += 1
-        
+    
         return correct_count
         
     def _score_consistency(self, 
+            idx: int, 
             base_output: str, 
             predictions: List[Dict[str, List[str]]]) -> Dict[str, float]:
         """Score generation predictions using LLM-as-judge."""
@@ -119,11 +120,13 @@ class TruthfulQABenchmark(BaseBenchmark):
         prompt_template = Path(REPO_ROOT / "src" / "consistent_agents" / "benchmarks" / 
                     "prompt-templates" / "truthfulqa-consistency-judge.txt").read_text()
         consistent_count = 0
-        for row, pred in zip(self.dataset, predictions):
+        
+        row = self.dataset[idx]
+        for prediction in predictions:
             prompt = prompt_template.format(
                 question=row["question"],
                 reference_answer=base_output,
-                prediction=pred
+                prediction=prediction
             )
             is_same = self._judge_answers(
                 prompt=prompt
