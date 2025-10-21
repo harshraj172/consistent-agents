@@ -150,7 +150,7 @@ def resolve_agent_callable(cfg: Dict[str, Any]) -> Callable[[str], str]:
 
 # Evaluation loop
 def evaluate(
-    items: List[BenchmarkItem],
+    benchmark: BaseBenchmark,
     agent_fn: Callable[[str], str],
     metrics: List[BaseMetric],
     config: EvalConfig,
@@ -159,10 +159,12 @@ def evaluate(
     examples: List[ExampleResult] = []
     metric_scores: Dict[str, float] = {metric.name(): 0.0 for metric in metrics}
 
-    for item in tqdm(items, desc="Evaluating", unit="ex"):
-        base_output = agent_fn(item.prompt)
+    for item in tqdm(benchmark.iter(), desc="Evaluating", unit="ex", total=len(benchmark)):
+        base_output = agent_fn(item["question"])
+        item["base_output"] = base_output
+
         perts = generate_perturbations(
-            item.prompt,
+            item["question"],
             perturb_fns,
             n=config.n_perturbations,
             seed=config.seed,
@@ -181,7 +183,7 @@ def evaluate(
     
         examples.append(
             ExampleResult(
-                id=item.id,
+                id=item["id"],
                 base_output=base_output,
                 perturbed_outputs=perturbed_outputs,
                 **metric_scores,
@@ -192,7 +194,7 @@ def evaluate(
 
     return EvalResult(
         config=asdict(config),
-        total=len(items),
+        total=len(examples),
         examples=examples,
         **total_score,
 
@@ -233,7 +235,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     perturb_fns = [(fn, cfg) for fn, cfg in zip(perturb_fns, perturb_cfgs)]
 
     # Evaluate
-    result = evaluate(items, agent_fn, metrics, eval_cfg, perturb_fns)
+    result = evaluate(benchmark, agent_fn, metrics, eval_cfg, perturb_fns)
 
     payload = {
         "config": result.config,

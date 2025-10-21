@@ -31,8 +31,8 @@ class ConsistencyMetric(BaseMetric):
         prompt_template = Path(REPO_ROOT / "src" / "consistent_agents" / "benchmarks" / 
                               "prompt-templates" / "truthfulqa-consistency-judge.txt").read_text()
         
-        reference_answer = item.label
-        question = item.prompt
+        reference_answer = item["base_output"]
+        question = item["question"]
         
         consistent_count = 0
         for perturbation in perturbed_outputs:
@@ -46,11 +46,8 @@ class ConsistencyMetric(BaseMetric):
                 prediction=prediction,
                 prompt_template=prompt_template
             )
-            
             if is_consistent:
                 consistent_count += 1
-
-        print("Consistency count: ", consistent_count)
         
         total_perturbations = len(perturbed_outputs)
         item_score = consistent_count / total_perturbations if total_perturbations > 0 else 0.0
@@ -94,6 +91,7 @@ class ConsistencyMetric(BaseMetric):
             )
             
             judgment = response.choices[0].message.content.strip()
+
             return judgment.lower().startswith('yes')
             
         except Exception as e:

@@ -31,7 +31,7 @@ class AccuracyMetric(BaseMetric):
         prompt_template = Path(REPO_ROOT / "src" / "consistent_agents" / "benchmarks" / 
                               "prompt-templates" / "truthfulqa-accuracy-judge.txt").read_text()
         
-        question = item.prompt
+        question = item["question"]
         correct_answers = getattr(item, 'correct_answers', [])
         incorrect_answers = getattr(item, 'incorrect_answers', [])
         

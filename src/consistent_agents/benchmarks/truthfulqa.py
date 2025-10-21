@@ -68,8 +68,9 @@ class TruthfulQABenchmark(BaseBenchmark):
         """Iterate over the dataset examples."""
         if self.dataset is None:
             self.load()
-        for example in self.dataset:
+        for idx, example in enumerate(self.dataset):
             yield {
+                "id": idx,
                 "question": example["question"],
                 "prompt": self.format_prompt(example["question"]),
                 "correct_answers": example["correct_answers"],
