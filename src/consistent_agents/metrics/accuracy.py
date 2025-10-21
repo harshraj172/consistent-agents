@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 from consistent_agents.metrics.base import BaseMetric
 from consistent_agents.data_models import BenchmarkItem
 
@@ -26,11 +26,8 @@ class AccuracyMetric(BaseMetric):
             )
         self.client = OpenAI()
 
-    def item_score(self, item: BenchmarkItem) -> Dict[str, float]:
+    def item_score(self, item: BenchmarkItem, perturbed_outputs: List[Dict[str, Any]]) -> Dict[str, float]:
         """Calculate accuracy score for a single benchmark item."""
-        if not hasattr(item, 'perturbations') or not item.perturbations:
-            return {"item_accuracy_score": 0.0}
-        
         prompt_template = Path(REPO_ROOT / "src" / "consistent_agents" / "benchmarks" / 
                               "prompt-templates" / "truthfulqa-accuracy-judge.txt").read_text()
         
@@ -39,7 +36,7 @@ class AccuracyMetric(BaseMetric):
         incorrect_answers = getattr(item, 'incorrect_answers', [])
         
         correct_count = 0
-        for perturbation in item.perturbations:
+        for perturbation in perturbed_outputs:
             prediction = perturbation.get('output', '')
             if not prediction:
                 continue
@@ -55,18 +52,21 @@ class AccuracyMetric(BaseMetric):
             if is_correct:
                 correct_count += 1
         
-        total_perturbations = len(item.perturbations)
+        total_perturbations = len(perturbed_outputs)
         item_score = correct_count / total_perturbations if total_perturbations > 0 else 0.0
         
         self.total_correct += correct_count
         self.total_comparisons += total_perturbations
         
-        return {"item_accuracy_score": item_score}
+        return item_score
 
-    def total_score(self) -> Dict[str, float]:
+    def total_score(self) -> float:
         """Calculate total score across all processed items."""
         total_accuracy_score = self.total_correct / self.total_comparisons if self.total_comparisons > 0 else 0.0
-        return {"total_accuracy_score": total_accuracy_score}
+        return total_accuracy_score
+
+    def name(self) -> str:
+        return "accuracy"
 
     def _judge_accuracy(self, 
                        question: str, 

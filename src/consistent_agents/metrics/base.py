@@ -15,6 +15,11 @@ class BaseMetric(ABC):
         """Calculate score for a single benchmark item."""
         raise NotImplementedError
 
+    @abstractmethod
     def total_score(self) -> Dict[str, float]:
         """Calculate total score across all processed items."""
+        raise NotImplementedError
+    
+    @abstractmethod
+    def name(self) -> str:
         raise NotImplementedError
