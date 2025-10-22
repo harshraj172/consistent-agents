@@ -157,7 +157,7 @@ def evaluate(
     perturb_fns: List[Callable[[str], str]],
 ) -> EvalResult:
     examples: List[ExampleResult] = []
-    metric_scores: Dict[str, float] = {metric.name(): 0.0 for metric in metrics}
+    metric_scores: Dict[str, Any] = {metric.name(): None for metric in metrics}
 
     for item in tqdm(benchmark.iter(), desc="Evaluating", unit="ex", total=len(benchmark)):
         base_output = agent_fn(item["question"])
@@ -180,7 +180,7 @@ def evaluate(
 
         for metric in metrics:
             metric_scores[metric.name()] = metric.item_score(item, perturbed_outputs=perturbed_outputs)
-    
+
         examples.append(
             ExampleResult(
                 id=item["id"],
@@ -242,6 +242,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "total": result.total,
         "consistency": result.consistency,
         "accuracy": result.accuracy,
+        "bertscore": result.bertscore,
         "examples": [
             {
                 "id": ex.id,
@@ -249,6 +250,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "perturbed_outputs": ex.perturbed_outputs,
                 "consistency": ex.consistency,
                 "accuracy": ex.accuracy,
+                "bertscore": ex.bertscore,
             }
             for ex in result.examples
         ],

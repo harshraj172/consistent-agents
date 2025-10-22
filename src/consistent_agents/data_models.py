@@ -17,6 +17,7 @@ class EvalConfig:
     seed: int = 42
 
 
+
 @dataclass
 class ExampleResult:
     id: str
@@ -24,6 +25,7 @@ class ExampleResult:
     perturbed_outputs: List[Dict[str, Any]]
     consistency: int
     accuracy: int
+    bertscore: Dict[str, float]
     
 
 @dataclass
@@ -32,4 +34,5 @@ class EvalResult:
     total: int
     consistency: int
     accuracy: float
+    bertscore: Dict[str, float]
     examples: List[ExampleResult]
