@@ -28,8 +28,8 @@ class AccuracyMetric(BaseMetric):
 
     def item_score(self, item: BenchmarkItem, perturbed_outputs: List[Dict[str, Any]]) -> Dict[str, float]:
         """Calculate accuracy score for a single benchmark item."""
-        prompt_template = Path(REPO_ROOT / "src" / "consistent_agents" / "benchmarks" / 
-                              "prompt-templates" / "truthfulqa-accuracy-judge.txt").read_text()
+        prompt_template = Path(REPO_ROOT / "src" / "consistent_agents" / "metrics" / 
+                              "prompt-templates" / "accuracy-judge.txt").read_text()
         
         question = item["question"]
         correct_answers = getattr(item, 'correct_answers', [])

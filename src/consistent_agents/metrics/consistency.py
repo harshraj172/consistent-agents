@@ -28,8 +28,8 @@ class ConsistencyMetric(BaseMetric):
 
     def item_score(self, item: BenchmarkItem, perturbed_outputs: List[Dict[str, Any]]) -> Dict[str, float]:
         """Calculate consistency score for a single benchmark item."""
-        prompt_template = Path(REPO_ROOT / "src" / "consistent_agents" / "benchmarks" / 
-                              "prompt-templates" / "truthfulqa-consistency-judge.txt").read_text()
+        prompt_template = Path(REPO_ROOT / "src" / "consistent_agents" / "metrics" / 
+                              "prompt-templates" / "consistency-judge.txt").read_text()
         
         reference_answer = item["base_output"]
         question = item["question"]

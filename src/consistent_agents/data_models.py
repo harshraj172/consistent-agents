@@ -23,16 +23,21 @@ class ExampleResult:
     id: str
     base_output: str
     perturbed_outputs: List[Dict[str, Any]]
-    consistency: int
-    accuracy: int
-    bertscore: Dict[str, float]
-    
+    consistency: float
+    accuracy: float
+    bertscore: float
+    rouge: float
+    entailment: float
+    contradiction: float
 
 @dataclass
 class EvalResult:
     config: Dict[str, Any]
     total: int
-    consistency: int
+    consistency: float
     accuracy: float
-    bertscore: Dict[str, float]
+    bertscore: float
+    rouge: float
+    entailment: float
+    contradiction: float
     examples: List[ExampleResult]

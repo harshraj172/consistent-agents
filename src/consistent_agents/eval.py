@@ -243,6 +243,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         "consistency": result.consistency,
         "accuracy": result.accuracy,
         "bertscore": result.bertscore,
+        "rouge": result.rouge,
+        "entailment": result.entailment,
+        "contradiction": result.contradiction,
         "examples": [
             {
                 "id": ex.id,
@@ -251,6 +254,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "consistency": ex.consistency,
                 "accuracy": ex.accuracy,
                 "bertscore": ex.bertscore,
+                "rouge": ex.rouge,
+                "entailment": ex.entailment,
+                "contradiction": ex.contradiction,
             }
             for ex in result.examples
         ],

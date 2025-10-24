@@ -36,20 +36,20 @@ class BERTScoreMetric(BaseMetric):
                 "bert-score package not installed. Install with: pip install bert-score"
             )
 
-    def item_score(self, item: BenchmarkItem, perturbed_outputs: List[Dict[str, Any]]) -> Dict[str, float]:
-        """Calculate BERTScore for a single benchmark item.
+    def item_score(self, item: BenchmarkItem, perturbed_outputs: List[Dict[str, Any]]) -> float:
+        """Calculate BERTScore F1 for a single benchmark item.
         
         Args:
             item: The benchmark item containing reference text
             perturbed_outputs: List of perturbed outputs to evaluate
             
         Returns:
-            Dictionary containing BERTScore metrics (precision, recall, f1)
+            F1 score as a float
         """
         if item.get('question') is None:
-            # If no reference question, return zero scores
+            # If no reference question, return zero score
             print("empty question")
-            return {"precision": 0.0, "recall": 0.0, "f1": 0.0}
+            return 0.0
         
         reference = item['question']
         candidates = [perturbation.get('output', '') for perturbation in perturbed_outputs]
@@ -58,52 +58,36 @@ class BERTScoreMetric(BaseMetric):
         candidates = [cand for cand in candidates if cand.strip()]
         if not candidates:
             print("empty candidates")
-            return {"precision": 0.0, "recall": 0.0, "f1": 0.0}
+            return 0.0
         
         try:
             # Compute BERTScore for all candidates against the reference
             P, R, F1 = self.scorer.score(candidates, [reference] * len(candidates))
             
-            # Average the scores across all candidates
-            avg_precision = P.mean().item()
-            avg_recall = R.mean().item()
+            # Average the F1 score across all candidates
             avg_f1 = F1.mean().item()
             
-            # Store individual scores for total calculation
-            self.scores.append({
-                "precision": avg_precision,
-                "recall": avg_recall,
-                "f1": avg_f1
-            })
+            # Store only F1 score for total calculation
+            self.scores.append(avg_f1)
             
-            return {
-                "precision": avg_precision,
-                "recall": avg_recall,
-                "f1": avg_f1
-            }
+            return avg_f1
             
         except Exception as e:
             print(f"Error computing BERTScore: {e}")
-            return {"precision": 0.0, "recall": 0.0, "f1": 0.0}
+            return 0.0
 
-    def total_score(self) -> Dict[str, float]:
-        """Calculate total BERTScore across all processed items.
+    def total_score(self) -> float:
+        """Calculate total BERTScore F1 across all processed items.
         
         Returns:
-            Dictionary containing average BERTScore metrics
+            Average F1 score as a float
         """
         if not self.scores:
-            return {"precision": 0.0, "recall": 0.0, "f1": 0.0}
+            return 0.0
         
-        avg_precision = sum(score["precision"] for score in self.scores) / len(self.scores)
-        avg_recall = sum(score["recall"] for score in self.scores) / len(self.scores)
-        avg_f1 = sum(score["f1"] for score in self.scores) / len(self.scores)
+        avg_f1 = sum(self.scores) / len(self.scores)
         
-        return {
-            "precision": avg_precision,
-            "recall": avg_recall,
-            "f1": avg_f1
-        }
+        return avg_f1
 
     def name(self) -> str:
         """Return the name of this metric."""
