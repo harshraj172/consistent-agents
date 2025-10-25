@@ -7,8 +7,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
 class EntailmentMetric(BaseMetric):
-    """One-directional entailment metric using LLM-as-judge.
-    Scores 1.0 if A→B is 'Yes', else 0.0, averaged across perturbations.
+    """Bidirectional entailment metric using LLM-as-judge.
+    Scores 1.0 if A↔B is 'Yes', else 0.0, averaged across perturbations.
     """
 
     def __init__(self, judge_model: str = "gpt-4o-mini", **kwargs):

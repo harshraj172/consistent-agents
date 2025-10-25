@@ -11,12 +11,12 @@ class BaseMetric(ABC):
         self.kwargs = kwargs
 
     @abstractmethod
-    def item_score(self, item: BenchmarkItem) -> Dict[str, float]:
+    def item_score(self, item: BenchmarkItem, perturbed_outputs: List[Dict[str, Any]]) -> float:
         """Calculate score for a single benchmark item."""
         raise NotImplementedError
 
     @abstractmethod
-    def total_score(self) -> Dict[str, float]:
+    def total_score(self) -> float:
         """Calculate total score across all processed items."""
         raise NotImplementedError
     
