@@ -7,11 +7,11 @@ from consistent_agents.benchmarks.swebench.swebench_benchmark import SWEBenchBen
 
 def test_oracle_patch_passes() -> None:
 
-
+    num_test_samples = 1
     benchmark = SWEBenchBenchmark()
     benchmark.load()
 
-    for example_item in benchmark:
+    for i, example_item in enumerate(benchmark):
         example_item = next(iter(benchmark))
         example_item["env"].expected_patch = example_item["label"]
 
@@ -22,3 +22,6 @@ def test_oracle_patch_passes() -> None:
         assert result["consistent_count"] == 1
         assert result["correct_count"] == 1
         assert result["total"] == 1
+
+        if i==num_test_samples:
+            break

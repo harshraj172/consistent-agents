@@ -62,12 +62,12 @@ def main() -> None:
             report_map[instance_id]["resolved"] = True
         report_map[instance_id]["tests_status"] = report
 
-    print("$start_marker")
+    print("SWEBench results starts here")
     if report_map[instance_id]["resolved"]:
         print("PASSED")
     else:
         print("FAILED")
-    print("$end_marker")
+    print("SWEBench results ends here")
 
 
 if __name__ == "__main__":

@@ -125,18 +125,18 @@ class SWEBenchBenchmark(BaseBenchmark):
             if not uploaded:
                 return False
 
-            apply_result = env.execute("bash /testbed/solution.sh false", cwd="/testbed", timeout=3600)
+            apply_result = env.execute("bash solution.sh false", cwd="/testbed", timeout=300)
             applied = apply_result.get("returncode", -1) == 0
             if not applied:
                 return False
 
-            test_result = env.execute("bash /tests/run-tests.sh", timeout=3600)
+            test_result = env.execute("bash /tests/run-tests.sh", cwd="/testbed", timeout=3600)
             passed = self._parse_test_output(test_result.get("stdout", ""))
             return passed
         finally:
             try:
                 if uploaded:
-                    env.execute("bash /testbed/solution.sh true", cwd="/testbed", timeout=3600)
+                    env.execute("bash solution.sh true", cwd="/testbed", timeout=300)
             finally:
                 tmp_path.unlink(missing_ok=True)
     
@@ -150,7 +150,7 @@ class SWEBenchBenchmark(BaseBenchmark):
         state = self._prepared[idx]
         env = state["env"]
 
-        env.upload(str(state["tests_dir"]), "/tests")
+        env.upload(str(state["tests_dir"]), "/")
 
         base_passed = self._apply_patch_and_test(env, str(base_output))
 
@@ -161,7 +161,9 @@ class SWEBenchBenchmark(BaseBenchmark):
 
         consistent_count = correct_count = sum(1 for passed in outcomes if passed)
         total = len(outcomes) if outcomes else 1
-
+        
+        # env.stop()
+        
         return {
             "consistent_count": consistent_count,
             "correct_count": correct_count,
