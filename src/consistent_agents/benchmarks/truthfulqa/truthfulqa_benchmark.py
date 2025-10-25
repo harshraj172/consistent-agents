@@ -3,8 +3,7 @@ from typing import Iterator, Dict, Any, List, Optional
 
 import datasets
 from consistent_agents.benchmarks.base import BaseBenchmark
-
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+from consistent_agents.environments import DockerEnvironment
 
 
 class TruthfulQABenchmark(BaseBenchmark):
@@ -31,6 +30,8 @@ class TruthfulQABenchmark(BaseBenchmark):
         self.split = split
         self.task = task
         self.dataset = None
+        self._prepared: Dict[int, Dict[str, Any]] = {}
+        self.template_dir = Path(__file__).parent / "prompt-templates"
         
         if task not in ["generation"]:
             raise ValueError(f"Task must be 'generation', got {task}")
@@ -64,16 +65,28 @@ class TruthfulQABenchmark(BaseBenchmark):
         prompt = f"Question: {question}\nAnswer:"
         return prompt
     
+    def _prepare_instance(self, idx: int, example: Dict[str, Any]) -> Dict[str, Any]:
+        """Prepare environment for a TruthfulQA example."""
+        if idx in self._prepared:
+            return self._prepared[idx]
+
+        env = DockerEnvironment()
+        state = {"env": env}
+        self._prepared[idx] = state
+        return state
+    
     def iter(self) -> Iterator[Dict[str, Any]]:
         """Iterate over the dataset examples."""
         if self.dataset is None:
             self.load()
-        for example in self.dataset:
+        for idx, example in enumerate(self.dataset):
+            state = self._prepare_instance(idx, example)
             yield {
                 "question": example["question"],
                 "prompt": self.format_prompt(example["question"]),
                 "correct_answers": example["correct_answers"],
-                "incorrect_answers": example["incorrect_answers"]
+                "incorrect_answers": example["incorrect_answers"],
+                "env": state["env"],
             }
     
     def score(self, idx: int, base_output: str, predictions: List[Any]) -> Dict[str, float]:
@@ -88,8 +101,7 @@ class TruthfulQABenchmark(BaseBenchmark):
         """Score generation predictions using LLM-as-judge"""
         
         # Load prompt template
-        prompt_template = Path(REPO_ROOT / "src" / "consistent_agents" / "benchmarks" / 
-                            "prompt-templates" / "truthfulqa-accuracy-judge.txt").read_text()
+        prompt_template = Path(self.template_dir / "truthfulqa-accuracy-judge.txt").read_text()
         correct_count = 0
         
         row = self.dataset[idx]
@@ -117,8 +129,7 @@ class TruthfulQABenchmark(BaseBenchmark):
             predictions: List[Dict[str, List[str]]]) -> Dict[str, float]:
         """Score generation predictions using LLM-as-judge."""
         
-        prompt_template = Path(REPO_ROOT / "src" / "consistent_agents" / "benchmarks" / 
-                    "prompt-templates" / "truthfulqa-consistency-judge.txt").read_text()
+        prompt_template = Path(self.template_dir / "truthfulqa-consistency-judge.txt").read_text()
         consistent_count = 0
         
         row = self.dataset[idx]
