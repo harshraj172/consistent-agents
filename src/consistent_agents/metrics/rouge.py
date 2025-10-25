@@ -37,13 +37,8 @@ class ROUGEScoreMetric(BaseMetric):
         Returns:
             Single scalar: ROUGE F1 for the configured rouge_type, averaged over candidates.
         """
-        if item.get("question") is None:
-            return 0.0
-
         reference = item["question"]
-        candidates = [p.get("output", "").strip() for p in perturbed_outputs if p.get("output", "").strip()]
-        if not candidates:
-            return 0.0
+        candidates = [p["output"] for p in perturbed_outputs]
 
         try:
             vals = []

@@ -46,28 +46,14 @@ class BERTScoreMetric(BaseMetric):
         Returns:
             F1 score as a float
         """
-        if item.get('question') is None:
-            # If no reference question, return zero score
-            print("empty question")
-            return 0.0
-        
         reference = item['question']
-        candidates = [perturbation.get('output', '') for perturbation in perturbed_outputs]
-        
-        # Filter out empty candidates
-        candidates = [cand for cand in candidates if cand.strip()]
-        if not candidates:
-            print("empty candidates")
-            return 0.0
+        candidates = [perturbation['output'] for perturbation in perturbed_outputs]
         
         try:
-            # Compute BERTScore for all candidates against the reference
             P, R, F1 = self.scorer.score(candidates, [reference] * len(candidates))
             
-            # Average the F1 score across all candidates
             avg_f1 = F1.mean().item()
             
-            # Store only F1 score for total calculation
             self.scores.append(avg_f1)
             
             return avg_f1

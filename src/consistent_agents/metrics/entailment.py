@@ -33,17 +33,13 @@ class EntailmentMetric(BaseMetric):
         )
         self.prompt_template = self.template_path.read_text()
 
-    def item_score(self, item: BenchmarkItem, perturbed_outputs: List[Dict[str, Any]]) -> Dict[str, float]:
+    def item_score(self, item: BenchmarkItem, perturbed_outputs: List[Dict[str, Any]]) -> float:
         """Calculate entailment score for a single benchmark item."""
-        question = item.get("base_output", "")
-        if not question:
-            return 0.0
+        question = item["base_output"]
 
         correct_count = 0
         for perturbation in perturbed_outputs:
-            prediction = perturbation.get("output", "").strip()
-            if not prediction:
-                continue
+            prediction = perturbation["output"]
 
             is_entailed = self._judge_entailment(
                 sentence_a=question,

@@ -42,15 +42,11 @@ class ContradictionMetric(BaseMetric):
 
     def item_score(self, item: BenchmarkItem, perturbed_outputs: List[Dict[str, Any]]) -> float:
         """Calculate non-contradiction score for a single benchmark item."""
-        base_output = item.get("base_output", "")
-        if not base_output:
-            return 0.0
+        base_output = item["base_output"]
 
-        correct_count = 0  # counts NON-contradictions (i.e., judge says "No")
+        correct_count = 0
         for p in perturbed_outputs:
-            perturbed_output = p.get("output", "").strip()
-            if not perturbed_output:
-                continue
+            perturbed_output = p["output"]
 
             is_contradiction = self._judge_contradiction(
                 sentence_a=base_output,

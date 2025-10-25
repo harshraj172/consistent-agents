@@ -36,9 +36,7 @@ class ConsistencyMetric(BaseMetric):
         
         consistent_count = 0
         for perturbation in perturbed_outputs:
-            prediction = perturbation.get('output', '')
-            if not prediction:
-                continue
+            prediction = perturbation['output']
             
             is_consistent = self._judge_consistency(
                 question=question,
