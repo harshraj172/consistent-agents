@@ -140,10 +140,10 @@ def evaluate(
     metric_scores: Dict[str, Any] = {metric.name(): None for metric in metrics}
 
     for item in tqdm(benchmark.iter(), desc="Evaluating", unit="ex", total=len(benchmark)):
-    #     base_output = agent_fn(item["question"], item.env)
-    #     item["base_output"] = base_output
+        base_output = agent_fn(item["question"], env=item.env)
+        item["base_output"] = base_output
 
-    # for item in tqdm(items, desc="Evaluating", unit="ex"):
+    for item in tqdm(items, desc="Evaluating", unit="ex"):
         base_output = agent_fn(item.prompt, item.env)
         perts = generate_perturbations(
             item["question"],
