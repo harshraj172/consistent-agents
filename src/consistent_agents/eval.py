@@ -140,7 +140,7 @@ def evaluate(
     metric_scores: Dict[str, Any] = {metric.name(): None for metric in metrics}
 
     for item in tqdm(benchmark.iter(), desc="Evaluating", unit="ex", total=len(benchmark)):
-        base_output = agent_fn(item["question"], item.env)
+        base_output = agent_fn(item["question"])
         item["base_output"] = base_output
 
     # for item in tqdm(items, desc="Evaluating", unit="ex"):
