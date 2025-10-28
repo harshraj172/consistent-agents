@@ -246,6 +246,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "rouge": result.rouge,
         "entailment": result.entailment,
         "contradiction": result.contradiction,
+        "entropy_consistency": result.entropy_consistency,
         "examples": [
             {
                 "id": ex.id,
@@ -257,6 +258,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "rouge": ex.rouge,
                 "entailment": ex.entailment,
                 "contradiction": ex.contradiction,
+                "entropy_consistency": ex.entropy_consistency,
             }
             for ex in result.examples
         ],

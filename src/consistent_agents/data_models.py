@@ -29,6 +29,7 @@ class ExampleResult:
     rouge: float
     entailment: float
     contradiction: float
+    entropy_consistency: float
 
 @dataclass
 class EvalResult:
@@ -40,4 +41,5 @@ class EvalResult:
     rouge: float
     entailment: float
     contradiction: float
+    entropy_consistency: float
     examples: List[ExampleResult]
