@@ -153,7 +153,7 @@ def evaluate(
         )
         perturbed_outputs: List[Dict[str, Any]] = []
         for p_type, p_text in perts:
-            out = agent_fn(p_text, item.env)
+            out = agent_fn(p_text, item["env"])
             perturbed_outputs.append({
                 "type": p_type,
                 "text": p_text,
