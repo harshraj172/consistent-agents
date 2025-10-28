@@ -7,7 +7,7 @@ import sys
 from tqdm.auto import tqdm
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from consistent_agents.data_models import (BenchmarkItem,
                                            EvalConfig, 
@@ -16,41 +16,29 @@ from consistent_agents.data_models import (BenchmarkItem,
 from consistent_agents.metrics.base import BaseMetric
 from consistent_agents.utils import (resolve_object, 
                                     maybe_instantiate)
-from consistent_agents.benchmarks.base import BaseBenchmark
+from consistent_agents.benchmarks import BaseBenchmark
+from consistent_agents.environments import BaseEnvironment
 
-
-# benchmark
-def _iter_benchmark_examples(benchmark_obj: Any) -> Iterable[Dict[str, Any]]:
-    if hasattr(benchmark_obj, "iter") and callable(getattr(benchmark_obj, "iter")):
-        return benchmark_obj.iter()
-    if hasattr(benchmark_obj, "__iter__"):
-        return iter(benchmark_obj)
-    raise TypeError("Benchmark object must define an `iter()` or `__iter__` method")
-
+    
 def load_benchmark_from_config(bm_cfg: Dict[str, Any]) -> Tuple[BaseBenchmark, List[BenchmarkItem]]:
     """Create a benchmark instance from config and return items."""
     path = bm_cfg.get("path")
     params = bm_cfg.get("params", {})
     if not path:
         raise ValueError("benchmark.path must be provided in config.yaml")
-
+    
     obj = resolve_object(path)
     benchmark = maybe_instantiate(obj, params)
     if hasattr(benchmark, "load") and callable(getattr(benchmark, "load")):
         benchmark.load()
 
     items: List[BenchmarkItem] = []
-    for ex_id, ex in enumerate(_iter_benchmark_examples(benchmark)):
-        prompt = (
-            ex.get("prompt")
-            or ex.get("input")
-            or ex.get("text")
-            or ex.get("question")
-        )
+    for ex_id, ex in enumerate(benchmark):
+        prompt = ex["prompt"]
         if prompt is None:
             continue
         label = ex.get("label") if isinstance(ex.get("label"), (str, int)) else None
-        items.append(BenchmarkItem(id=ex_id, prompt=str(prompt), label=str(label) if label is not None else None))
+        items.append(BenchmarkItem(id=ex_id, prompt=str(prompt), label=str(label) if label is not None else None, env=ex["env"]))
     return benchmark, items
 
 def load_metrics_from_config(metrics_cfg: List[Dict[str, Any]]) -> List[BaseMetric]:
@@ -116,7 +104,6 @@ def resolve_agent_callable(cfg: Dict[str, Any]) -> Callable[[str], str]:
     
     if isinstance(obj, type):
         model = None
-        env = None
         if cfg.get("model"):
             mpath = cfg["model"].get("path")
             mparams = cfg["model"].get("params", {})
@@ -124,19 +111,12 @@ def resolve_agent_callable(cfg: Dict[str, Any]) -> Callable[[str], str]:
                 model = maybe_instantiate(resolve_object(mpath), mparams)
         else:
             raise ValueError("agent.model.path must be provided in config.yaml")
-        if cfg.get("environment"):
-            epath = cfg["environment"].get("path")
-            eparams = cfg["environment"].get("params", {})
-            if epath:
-                env = maybe_instantiate(resolve_object(epath), eparams)
-        else:
-            raise ValueError("agent.environment.path must be provided in config.yaml")
         
-        instance = obj(model=model, env=env, **params)
+        instance = obj(model=model, **params)
 
         if hasattr(instance, "run") and callable(getattr(instance, "run")):
-            def _runner(prompt: str) -> str:
-                res = instance.run(prompt)
+            def _runner(prompt: str, env: BaseEnvironment) -> str:
+                res = instance.run(prompt, env)
                 if isinstance(res, tuple) and res:
                     return str(res[-1])
                 return str(res)
@@ -160,9 +140,11 @@ def evaluate(
     metric_scores: Dict[str, Any] = {metric.name(): None for metric in metrics}
 
     for item in tqdm(benchmark.iter(), desc="Evaluating", unit="ex", total=len(benchmark)):
-        base_output = agent_fn(item["question"])
+        base_output = agent_fn(item["question"], item["env"])
         item["base_output"] = base_output
 
+    # for item in tqdm(items, desc="Evaluating", unit="ex"):
+    #     base_output = agent_fn(item.prompt, item.env)
         perts = generate_perturbations(
             item["question"],
             perturb_fns,
@@ -171,7 +153,7 @@ def evaluate(
         )
         perturbed_outputs: List[Dict[str, Any]] = []
         for p_type, p_text in perts:
-            out = agent_fn(p_text)
+            out = agent_fn(p_text, item["env"])
             perturbed_outputs.append({
                 "type": p_type,
                 "text": p_text,

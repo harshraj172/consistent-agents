@@ -3,11 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from consistent_agents.environments import BaseEnvironment
+
 
 @dataclass
 class BenchmarkItem:
     id: str
     prompt: str
+    env: BaseEnvironment
     label: Optional[str] = None
 
 

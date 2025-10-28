@@ -76,8 +76,7 @@ class DefaultAgent:
     
     def __init__(
         self, 
-        model: BaseModel, 
-        env: BaseEnvironment, 
+        model: BaseModel,  
         *, 
         config_class_name: str = "default",
         **kwargs
@@ -93,7 +92,6 @@ class DefaultAgent:
         self.config = config_class(**kwargs)
         self.messages: List[Dict[str, Any]] = []
         self.model = model
-        self.env = env
         self.extra_template_vars: Dict[str, Any] = {}
         self.steps: int = 0  
 
@@ -108,9 +106,10 @@ class DefaultAgent:
         """Add a message to the conversation history."""
         self.messages.append({"role": role, "content": content, **kwargs})
     
-    def run(self, task: str, **kwargs) -> Tuple[str, str]:
+    def run(self, task: str, env: BaseEnvironment, **kwargs) -> Tuple[str, str]:
         """Run the agent until completion."""
         self.extra_template_vars |= {"task": task, **kwargs}
+        self.env = env
         self.messages = []
         self.steps = 0  
         self.initialize_messages()
