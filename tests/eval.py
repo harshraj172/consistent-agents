@@ -45,7 +45,7 @@ def _run_single_turn_eval(cfg_path: Path) -> Dict[str, Any]:
     example_payloads: List[Dict[str, Any]] = []
 
     for item in items:
-        base_output = agent_fn(item.prompt)
+        base_output = agent_fn(item.prompt, item.env)
         generated_perts = generate_perturbations(
             item.prompt,
             perturbations,
@@ -54,7 +54,7 @@ def _run_single_turn_eval(cfg_path: Path) -> Dict[str, Any]:
         )
         perturbed_outputs: List[Dict[str, Any]] = []
         for pert_type, pert_prompt in generated_perts:
-            pert_output = agent_fn(pert_prompt)
+            pert_output = agent_fn(pert_prompt, item.env)
             perturbed_outputs.append(
                 {
                     "type": pert_type,
