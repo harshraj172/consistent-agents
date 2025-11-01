@@ -96,11 +96,13 @@ class SWEBenchBenchmark(BaseBenchmark):
             state = self._prepared.get(idx)
             if state is None:
                 state = self._prepare_instance(idx, example)
+            prompt_text = self._format_prompt(example, state)
             yield {
-                "instance_id": state["instance_id"],
-                "prompt": self._format_prompt(example, state),
+                "id": state["instance_id"], 
+                "question": prompt_text, 
+                "prompt": prompt_text,
                 "env": state["env"],
-                "label": state["label"]
+                "label": state["label"] 
             }
 
     @staticmethod

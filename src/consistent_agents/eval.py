@@ -143,8 +143,6 @@ def evaluate(
         base_output = agent_fn(item["question"], item["env"])
         item["base_output"] = base_output
 
-    # for item in tqdm(items, desc="Evaluating", unit="ex"):
-    #     base_output = agent_fn(item.prompt, item.env)
         perts = generate_perturbations(
             item["question"],
             perturb_fns,
@@ -160,26 +158,27 @@ def evaluate(
                 "output": out,
             })
 
+        current_metric_scores: Dict[str, float] = {}
         for metric in metrics:
-            metric_scores[metric.name()] = metric.item_score(item, perturbed_outputs=perturbed_outputs)
+            score = metric.item_score(item, perturbed_outputs=perturbed_outputs)
+            current_metric_scores[metric.name()] = score
 
         examples.append(
             ExampleResult(
                 id=item["id"],
                 base_output=base_output,
                 perturbed_outputs=perturbed_outputs,
-                **metric_scores,
+                metrics=current_metric_scores,
             )
         )
 
-    total_score = {metric.name(): metric.total_score() for metric in metrics}
+    total_scores = {metric.name(): metric.total_score() for metric in metrics}
 
     return EvalResult(
         config=asdict(config),
         total=len(examples),
         examples=examples,
-        **total_score,
-
+        metrics=total_scores,
     )
 
 
@@ -222,23 +221,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     payload = {
         "config": result.config,
         "total": result.total,
-        "consistency": result.consistency,
-        "accuracy": result.accuracy,
-        "bertscore": result.bertscore,
-        "rouge": result.rouge,
-        "entailment": result.entailment,
-        "contradiction": result.contradiction,
+        **result.metrics, 
         "examples": [
             {
                 "id": ex.id,
                 "base_output": ex.base_output,
                 "perturbed_outputs": ex.perturbed_outputs,
-                "consistency": ex.consistency,
-                "accuracy": ex.accuracy,
-                "bertscore": ex.bertscore,
-                "rouge": ex.rouge,
-                "entailment": ex.entailment,
-                "contradiction": ex.contradiction,
+                **ex.metrics,
             }
             for ex in result.examples
         ],
