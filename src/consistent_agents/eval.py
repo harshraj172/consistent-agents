@@ -160,6 +160,7 @@ def evaluate(
 
         current_metric_scores: Dict[str, float] = {}
         for metric in metrics:
+            metric.set_benchmark(benchmark)
             score = metric.item_score(item, perturbed_outputs=perturbed_outputs)
             current_metric_scores[metric.name()] = score
 

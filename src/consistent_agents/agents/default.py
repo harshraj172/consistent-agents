@@ -152,13 +152,13 @@ class DefaultAgent:
 
     def execute_action(self, action: Dict[str, Any]) -> Dict[str, str]:
         """Execute a bash command in the environment."""
-        try:
-            output = self.env.execute(action["action"])
-        except subprocess.TimeoutExpired as e:
-            output = e.output.decode("utf-8", errors="replace") if e.output else ""
+        output = self.env.execute(action["action"])
+        if not output.get("success", False):
+            error_msg = output.get("stderr", "") or output.get("output", "")
             raise ExecutionTimeoutError(
-                self.render_template(self.config.timeout_template, action=action, output=output)
+                self.render_template(self.config.timeout_template, action=action, output=error_msg)
             )
+        
         self.has_finished(output)
         return output
     
@@ -169,7 +169,7 @@ class DefaultAgent:
     
     def parse_action(self, response: Dict[str, Any]) -> Dict[str, Any]:
         """Parse a bash action from the model's response."""
-        actions = re.findall(r"```(?:bash)?\s*\n(.*?)\n```", response["content"], re.DOTALL)
+        actions = re.findall(r"```(?:bash|shell)?\s*\n(.*?)\n```", response["content"], re.DOTALL)
         if len(actions) == 1:
             return {"action": actions[0].strip(), **response}
         raise FormatError(self.render_template(self.config.format_error_template, actions=actions))

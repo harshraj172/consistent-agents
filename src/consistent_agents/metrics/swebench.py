@@ -34,8 +34,7 @@ class SWEBenchMetric(BaseMetric):
         if self.benchmark is None:
             raise ValueError("SWEBenchMetric requires a benchmark instance. Set it via constructor or set_benchmark().")
         
-        # Get the index from the item ID (instance_id)
-        idx = self.benchmark.get_index(item.id)
+        idx = self.benchmark.get_index(item["id"])
         if idx is None:
             raise ValueError(f"Could not find index for instance_id: {item.id}")
         

@@ -36,16 +36,44 @@ class LocalEnvironment(BaseEnvironment):
         agent_scratchpad = REPO_ROOT / "agent_scratchpad"
         agent_scratchpad.mkdir(exist_ok=True)
 
-        result = subprocess.run(
-            command,
-            shell=True,
-            text=True,
-            cwd=agent_scratchpad,
-            env=os.environ | self.config.env,
-            timeout=timeout or self.config.timeout,
-            encoding="utf-8",
-            errors="replace",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-        )
-        return {"output": result.stdout, "returncode": result.returncode}
+        try:
+            result = subprocess.run(
+                command,
+                shell=True,
+                text=True,
+                cwd=agent_scratchpad,
+                env=os.environ | self.config.env,
+                timeout=timeout or self.config.timeout,
+                encoding="utf-8",
+                errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            return {
+                'success': result.returncode == 0,
+                'stdout': result.stdout,
+                'stderr': '',
+                'exit_code': result.returncode,
+                'output': result.stdout,
+                'returncode': result.returncode
+            }
+        except subprocess.TimeoutExpired:
+            self.logger.error(f"Command timed out after {timeout or self.config.timeout}s: {command}")
+            return {
+                'success': False,
+                'stdout': '',
+                'stderr': f'Command timed out after {timeout or self.config.timeout}s',
+                'exit_code': -1,
+                'output': '',
+                'returncode': -1
+            }
+        except Exception as e:
+            self.logger.error(f"Error executing command: {e}")
+            return {
+                'success': False,
+                'stdout': '',
+                'stderr': str(e),
+                'exit_code': -1,
+                'output': '',
+                'returncode': -1
+            }

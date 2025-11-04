@@ -209,7 +209,6 @@ class DockerEnvironment(BaseEnvironment):
                 cmd.extend(["-e", f"{key}={value}"])
             
             cmd.extend([self.container_id, "bash", "-lc", command])
-            
             result = subprocess.run(
                 cmd,
                 text=True,
