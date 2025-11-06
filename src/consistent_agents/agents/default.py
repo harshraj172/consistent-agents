@@ -118,9 +118,9 @@ class DefaultAgent:
                 has_reached_step_limit = self.steps >= self.config.step_limit
                 if has_reached_step_limit:
                     raise Submitted()
-                    
-                self.step()
+                
                 self.steps += 1
+                self.step()
 
             except NonTerminatingException as e:
                 self.add_message("user", str(e))

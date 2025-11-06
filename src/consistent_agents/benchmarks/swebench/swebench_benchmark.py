@@ -142,37 +142,6 @@ class SWEBenchBenchmark(BaseBenchmark):
             finally:
                 tmp_path.unlink(missing_ok=True)
     
-    def score(
-        self,
-        idx: int,
-        base_output: str,
-        predictions: List[Any], 
-    ) -> Dict[str, float]:
-        """Score predictions by applying patches and running the SWEBench harness."""
-        state = self._prepared[idx]
-        env = state["env"]
-
-        env.upload(str(state["tests_dir"]), "/")
-
-        base_passed = self._apply_patch_and_test(env, str(base_output))
-
-        outcomes: List[bool] = []
-        for prediction in predictions:
-            pred_passed = self._apply_patch_and_test(env, str(prediction))
-            outcomes.append(pred_passed)
-
-        consistent_count = correct_count = sum(1 for passed in outcomes if passed)
-        total = len(outcomes) if outcomes else 1
-        
-        # env.stop()
-        
-        return {
-            "consistent_count": consistent_count,
-            "correct_count": correct_count,
-            "total": total,
-            "base_passed": float(base_passed),
-        }
-
     def __len__(self) -> int:
         """Return the number of examples in the benchmark."""
         if self.dataset is None:
