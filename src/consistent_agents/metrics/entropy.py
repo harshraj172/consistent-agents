@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Callable, Optional
 from consistent_agents.metrics.base import BaseMetric
 from consistent_agents.data_models import BenchmarkItem
 import numpy as np
@@ -14,11 +14,15 @@ class EntropyMetric(BaseMetric):
 
     def __init__(self, 
                  judge_model: str = "gpt-4o-mini",
+                 agreement_function: Optional[Callable[[str, str, str, str], bool]] = None,
                  **kwargs):
         """Initialize the entropy metric."""
         super().__init__(**kwargs)
         self.judge_model = judge_model
         self.scores: List[float] = []  # Store individual entropy scores
+        
+        # Set agreement function, defaulting to _judge_consistency if None
+        self.agreement_function = agreement_function if agreement_function is not None else self._judge_consistency
         
         try:
             from openai import OpenAI
@@ -78,7 +82,7 @@ class EntropyMetric(BaseMetric):
             for j in range(len(C)):
                 s_c = C[j][0]
 
-                is_consistent = self._judge_consistency(
+                is_consistent = self.agreement_function(
                     question=question,
                     reference_answer=s_c,
                     prediction=outputs[i],
