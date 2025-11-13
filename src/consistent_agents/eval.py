@@ -14,6 +14,7 @@ from consistent_agents.data_models import (BenchmarkItem,
                                            EvalResult, 
                                            ExampleResult)
 from consistent_agents.metrics.base import BaseMetric
+from consistent_agents.metric_scores import MetricScores
 from consistent_agents.utils import (resolve_object, 
                                     maybe_instantiate)
 from consistent_agents.benchmarks import BaseBenchmark
@@ -137,14 +138,12 @@ def evaluate(
     perturb_fns: List[Callable[[str], str]],
 ) -> EvalResult:
     examples: List[ExampleResult] = []
-    metric_scores: Dict[str, Any] = {metric.name(): None for metric in metrics}
+    metric_scores = MetricScores(metrics)
 
     for item in tqdm(benchmark.iter(), desc="Evaluating", unit="ex", total=len(benchmark)):
         base_output = agent_fn(item["question"], item["env"])
         item["base_output"] = base_output
 
-    # for item in tqdm(items, desc="Evaluating", unit="ex"):
-    #     base_output = agent_fn(item.prompt, item.env)
         perts = generate_perturbations(
             item["question"],
             perturb_fns,
@@ -161,25 +160,27 @@ def evaluate(
             })
 
         for metric in metrics:
-            metric_scores[metric.name()] = metric.item_score(item, perturbed_outputs=perturbed_outputs)
+            score = metric.item_score(item, perturbed_outputs=perturbed_outputs)
+            metric_scores.add_score(metric, score)
 
+        scores = metric_scores.get_scores()
         examples.append(
             ExampleResult(
                 id=item["id"],
                 base_output=base_output,
                 perturbed_outputs=perturbed_outputs,
-                **metric_scores,
+                **scores,
             )
         )
 
-    total_score = {metric.name(): metric.total_score() for metric in metrics}
+    # Get total scores from all metrics
+    total_scores = metric_scores.get_total_scores()
 
     return EvalResult(
         config=asdict(config),
         total=len(examples),
+        **total_scores,
         examples=examples,
-        **total_score,
-
     )
 
 
@@ -219,16 +220,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Evaluate
     result = evaluate(benchmark, agent_fn, metrics, eval_cfg, perturb_fns)
 
+    # Build payload with nested consistency structure
     payload = {
         "config": result.config,
         "total": result.total,
         "consistency": result.consistency,
         "accuracy": result.accuracy,
-        "bertscore": result.bertscore,
-        "rouge": result.rouge,
         "entailment": result.entailment,
         "contradiction": result.contradiction,
-        "entropy_consistency": result.entropy_consistency,
         "examples": [
             {
                 "id": ex.id,
@@ -236,11 +235,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "perturbed_outputs": ex.perturbed_outputs,
                 "consistency": ex.consistency,
                 "accuracy": ex.accuracy,
-                "bertscore": ex.bertscore,
-                "rouge": ex.rouge,
                 "entailment": ex.entailment,
                 "contradiction": ex.contradiction,
-                "entropy_consistency": ex.entropy_consistency,
             }
             for ex in result.examples
         ],
