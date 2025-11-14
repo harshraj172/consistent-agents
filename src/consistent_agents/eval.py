@@ -13,7 +13,6 @@ from consistent_agents.data_models import (BenchmarkItem,
                                            EvalConfig, 
                                            EvalResult, 
                                            ExampleResult)
-from consistent_agents.metrics.base import BaseMetric
 from consistent_agents.utils import (resolve_object, 
                                     maybe_instantiate)
 from consistent_agents.benchmarks import BaseBenchmark
@@ -41,20 +40,6 @@ def load_benchmark_from_config(bm_cfg: Dict[str, Any]) -> Tuple[BaseBenchmark, L
         items.append(BenchmarkItem(id=ex_id, prompt=str(prompt), label=str(label) if label is not None else None, env=ex["env"]))
     return benchmark, items
 
-def load_metrics_from_config(metrics_cfg: List[Dict[str, Any]]) -> List[BaseMetric]:
-    """Load metrics from config and return instantiated metric objects."""
-    metrics = []
-    for metric_cfg in metrics_cfg:
-        path = metric_cfg.get("path")
-        params = metric_cfg.get("params", {})
-        if not path:
-            continue
-        
-        obj = resolve_object(path)
-        metric = maybe_instantiate(obj, params)
-        metrics.append(metric)
-    
-    return metrics
 # perturbation
 def _instantiate_perturbations(cfg_list: List[Dict[str, Any]]) -> List[Callable[[str], str]]:
     perts: List[Callable[[str], str]] = []
@@ -130,54 +115,56 @@ def resolve_agent_callable(cfg: Dict[str, Any]) -> Callable[[str], str]:
 
 # Evaluation loop
 def evaluate(
-    benchmark: BaseBenchmark,
+    items: List[BenchmarkItem],
     agent_fn: Callable[[str], str],
-    metrics: List[BaseMetric],
+    score_fn: Callable[[str], dict],
     config: EvalConfig,
     perturb_fns: List[Callable[[str], str]],
 ) -> EvalResult:
     examples: List[ExampleResult] = []
-    metric_scores: Dict[str, Any] = {metric.name(): None for metric in metrics}
+    consistent_count, correct_count, total = 0, 0, 0
 
-    for item in tqdm(benchmark.iter(), desc="Evaluating", unit="ex", total=len(benchmark)):
-        base_output = agent_fn(item["prompt"], item["env"])
-
+    for item in tqdm(items, desc="Evaluating", unit="ex"):
+        base_output = agent_fn(item.prompt, item.env)
         perts = generate_perturbations(
-            item["prompt"],
+            item.prompt,
             perturb_fns,
             n=config.n_perturbations,
             seed=config.seed,
         )
         perturbed_outputs: List[Dict[str, Any]] = []
-        for p_type, p_prompt in perts:
-            out = agent_fn(p_prompt, item["env"])
+        for p_type, p_text in perts:
+            out = agent_fn(p_text, item.env)
             perturbed_outputs.append({
                 "type": p_type,
-                "prompt": p_prompt,
+                "prompt": p_text,
                 "output": out,
             })
-
-        for metric in metrics:
-            metric_scores[metric.name()] = metric.item_score(item, perturbed_outputs=perturbed_outputs)
-
+        result = score_fn(
+            item.id, base_output, [po["output"] for po in perturbed_outputs]
+        )
+        consistent_count_per_row, correct_count_per_row, total_per_row = \
+            result["consistent_count"], result["correct_count"], result["total"]
+        correct_count += correct_count_per_row
+        consistent_count += consistent_count_per_row
+        total += total_per_row
         examples.append(
             ExampleResult(
-                id=item["id"],
-                base_prompt=item["prompt"],
+                id=item.id,
+                base_prompt=p_text,
                 base_output=base_output,
                 perturbed_outputs=perturbed_outputs,
-                **metric_scores,
+                consistency=consistent_count_per_row/total_per_row,
+                accuracy=correct_count_per_row/total_per_row,
             )
         )
 
-    total_score = {metric.name(): metric.total_score() for metric in metrics}
-
     return EvalResult(
         config=asdict(config),
-        total=len(examples),
+        consistency=consistent_count/total,
+        accuracy=correct_count/total,
+        total=total,
         examples=examples,
-        **total_score,
-
     )
 
 
@@ -200,12 +187,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Benchmark
     benchmark, items = load_benchmark_from_config(raw_cfg.get("benchmark", {}))
+    score_fn = getattr(benchmark, "score")
     
     # Agent
     agent_fn = resolve_agent_callable(raw_cfg.get("agent", {}))
-
-    # Metrics
-    metrics = load_metrics_from_config(raw_cfg.get("metrics", []))
 
     # Perturbations
     perturb_cfgs = raw_cfg.get("perturbations", [])
@@ -215,17 +200,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     perturb_fns = [(fn, cfg) for fn, cfg in zip(perturb_fns, perturb_cfgs)]
 
     # Evaluate
-    result = evaluate(benchmark, agent_fn, metrics, eval_cfg, perturb_fns)
+    result = evaluate(items, agent_fn, score_fn, eval_cfg, perturb_fns)
 
     payload = {
         "config": result.config,
         "total": result.total,
         "consistency": result.consistency,
         "accuracy": result.accuracy,
-        # "bertscore": result.bertscore,
-        # "rouge": result.rouge,
-        # "entailment": result.entailment,
-        # "contradiction": result.contradiction,
         "examples": [
             {
                 "id": ex.id,
@@ -234,10 +215,6 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "perturbed_outputs": ex.perturbed_outputs,
                 "consistency": ex.consistency,
                 "accuracy": ex.accuracy,
-                # "bertscore": ex.bertscore,
-                # "rouge": ex.rouge,
-                # "entailment": ex.entailment,
-                # "contradiction": ex.contradiction,
             }
             for ex in result.examples
         ],

@@ -127,7 +127,7 @@ class DefaultAgent:
                 self.add_message("user", str(e))
                 return type(e).__name__, str(e)
             self.steps += 1
-            
+    
     def initialize_messages(self) -> None:
         """Initialize the conversation with system and user prompts."""
         self.add_message("system", self.render_template(self.config.system_template))
@@ -177,5 +177,4 @@ class DefaultAgent:
     def has_finished(self, output: Dict[str, str]) -> None:
         """Check if the agent has completed its task."""
         lines = output.get("output", "").lstrip()
-        if lines and "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in lines:
-            raise Submitted(lines.replace("COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT", ""))
+        raise Submitted(lines.replace("COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT", ""))

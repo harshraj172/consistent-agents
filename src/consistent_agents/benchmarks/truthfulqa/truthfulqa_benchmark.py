@@ -1,4 +1,5 @@
 from pathlib import Path
+from itertools import combinations
 from typing import Iterator, Dict, Any, List, Optional
 
 import datasets
@@ -83,7 +84,6 @@ class TruthfulQABenchmark(BaseBenchmark):
         for idx, example in enumerate(self.dataset):
             state = self._prepare_instance(idx, example)
             yield {
-                "id": idx,
                 "question": example["question"],
                 "prompt": self.format_prompt(example["question"]),
                 "correct_answers": example["correct_answers"],
@@ -91,6 +91,86 @@ class TruthfulQABenchmark(BaseBenchmark):
                 "env": state["env"],
             }
     
+    def score(self, idx: int, base_output: str, predictions: List[Any]) -> Dict[str, float]:
+        """Calculate scores for TruthfulQA predictions."""
+        return {
+            "consistent_count": self._score_consistency(idx, predictions),
+            "correct_count": self._score_accuracy(idx, predictions),
+            "total":  len(predictions) * (len(predictions) - 1) // 2
+        }
+
+    def _score_accuracy(self, idx: int, predictions: List[str]) -> int:
+        """Score generation predictions using LLM-as-judge"""
+        
+        # Load prompt template
+        prompt_template = Path(self.template_dir / "truthfulqa-accuracy-judge.txt").read_text()
+        correct_count = 0
+        
+        row = self.dataset[idx]
+        question = row["question"]
+        correct_answers = row.get("correct_answers", [])
+        incorrect_answers = row.get("incorrect_answers", [])
+        for prediction in predictions:
+            prompt = prompt_template.format(
+                question=question,
+                prediction=prediction,
+                correct_answers=','.join(correct_answers),
+                incorrect_answers=','.join(incorrect_answers)
+            )
+            is_correct = self._judge_answers(
+                prompt=prompt,
+            )
+            if is_correct:
+                correct_count += 1
+    
+        return correct_count
+        
+    def _score_consistency(self, 
+            idx: int, 
+            predictions: List[Dict[str, List[str]]]) -> Dict[str, float]:
+        """Score generation predictions using LLM-as-judge."""
+        
+        prompt_template = Path(self.template_dir / "truthfulqa-consistency-judge.txt").read_text()
+        consistent_count = 0
+        
+        row = self.dataset[idx]
+        pairs = list(combinations(predictions, 2))
+        for (prediction1, prediction2) in pairs:
+            prompt = prompt_template.format(
+                question=row["question"],
+                prediction1=prediction1,
+                prediction2=prediction2
+            )
+            is_same = self._judge_answers(
+                prompt=prompt
+            )
+            if is_same:
+                consistent_count += 1
+        
+        return consistent_count
+    
+    def _judge_answers(self, prompt: str) -> bool:
+        """Use LLM to judge if prediction matches the reference answer"""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.judge_model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.1,
+                max_tokens=10
+            )
+            
+            judgment = response.choices[0].message.content.strip()
+            return judgment.lower().startswith('yes')
+            
+        except Exception as e:
+            print(f"Error during LLM judging: {e}")
+            return False
+        
     def __len__(self) -> int:
         """Return the number of examples in the dataset."""
         if self.dataset is None:
