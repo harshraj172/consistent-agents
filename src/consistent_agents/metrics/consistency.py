@@ -26,32 +26,35 @@ class ConsistencyMetric(BaseMetric):
             )
         self.client = OpenAI()
 
-    def item_score(self, item: BenchmarkItem, perturbed_outputs: List[Dict[str, Any]]) -> Dict[str, float]:
+    def item_score(self, item: BenchmarkItem, perturbed_outputs: List[Dict[str, Any]]) -> float:
         """Calculate consistency score for a single benchmark item."""
         prompt_template = Path(REPO_ROOT / "src" / "consistent_agents" / "metrics" / 
                               "prompt-templates" / "consistency-judge.txt").read_text()
         
-        reference_answer = item["base_output"]
         question = item["question"]
         
-        consistent_count = 0
-        for perturbation in perturbed_outputs:
-            prediction = perturbation['output']
-            
-            is_consistent = self._judge_consistency(
-                question=question,
-                reference_answer=reference_answer,
-                prediction=prediction,
-                prompt_template=prompt_template
-            )
-            if is_consistent:
-                consistent_count += 1
+        outputs = [perturbation['output'] for perturbation in perturbed_outputs]
+        n_outputs = len(outputs)
         
-        total_perturbations = len(perturbed_outputs)
-        item_score = consistent_count / total_perturbations if total_perturbations > 0 else 0.0
+        total_pairs = n_outputs * (n_outputs - 1) // 2 if n_outputs > 1 else 0
+        consistent_pairs = 0
         
-        self.total_consistent += consistent_count
-        self.total_comparisons += total_perturbations
+        for i in range(n_outputs):
+            for j in range(i + 1, n_outputs):
+                is_consistent = self._judge_consistency(
+                    question=question,
+                    reference_answer=outputs[i],
+                    prediction=outputs[j],
+                    prompt_template=prompt_template
+                )
+                
+                if is_consistent:
+                    consistent_pairs += 1
+        
+        item_score = consistent_pairs / total_pairs
+        
+        self.total_consistent += consistent_pairs
+        self.total_comparisons += total_pairs
         
         return item_score
 
