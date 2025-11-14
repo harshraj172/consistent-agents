@@ -25,13 +25,10 @@ class EvalConfig:
 class ExampleResult:
     id: str
     base_output: str
+    base_prompt: str
     perturbed_outputs: List[Dict[str, Any]]
     consistency: float
     accuracy: float
-    bertscore: float
-    rouge: float
-    entailment: float
-    contradiction: float
 
 @dataclass
 class EvalResult:
@@ -39,8 +36,4 @@ class EvalResult:
     total: int
     consistency: float
     accuracy: float
-    bertscore: float
-    rouge: float
-    entailment: float
-    contradiction: float
     examples: List[ExampleResult]

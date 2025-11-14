@@ -37,7 +37,7 @@ class ROUGEScoreMetric(BaseMetric):
         Returns:
             Single scalar: ROUGE F1 for the configured rouge_type, averaged over candidates.
         """
-        reference = item["question"]
+        reference = item["prompt"]
         candidates = [p["output"] for p in perturbed_outputs]
 
         try:

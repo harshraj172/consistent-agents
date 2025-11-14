@@ -46,7 +46,7 @@ class BERTScoreMetric(BaseMetric):
         Returns:
             F1 score as a float
         """
-        reference = item['question']
+        reference = item['prompt']
         candidates = [perturbation['output'] for perturbation in perturbed_outputs]
         
         try:

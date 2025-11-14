@@ -71,7 +71,6 @@ class SWEBenchBenchmark(BaseBenchmark):
         run_tests_path.chmod(0o755)
 
         env = DockerEnvironment()
-        env.stop()
         env.start(str(dockerfile_path), f"swebench-{instance_id}")
 
         state = {
@@ -97,7 +96,7 @@ class SWEBenchBenchmark(BaseBenchmark):
             if state is None:
                 state = self._prepare_instance(idx, example)
             yield {
-                "instance_id": state["instance_id"],
+                "id": state["instance_id"],
                 "prompt": self._format_prompt(example, state),
                 "env": state["env"],
                 "label": state["label"]
@@ -162,7 +161,7 @@ class SWEBenchBenchmark(BaseBenchmark):
         consistent_count = correct_count = sum(1 for passed in outcomes if passed)
         total = len(outcomes) if outcomes else 1
         
-        # env.stop()
+        env.stop()
         
         return {
             "consistent_count": consistent_count,

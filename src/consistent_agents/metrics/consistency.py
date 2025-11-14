@@ -31,7 +31,7 @@ class ConsistencyMetric(BaseMetric):
         prompt_template = Path(REPO_ROOT / "src" / "consistent_agents" / "metrics" / 
                               "prompt-templates" / "consistency-judge.txt").read_text()
         
-        question = item["question"]
+        prompt = item["prompt"]
         
         outputs = [perturbation['output'] for perturbation in perturbed_outputs]
         n_outputs = len(outputs)
@@ -42,7 +42,7 @@ class ConsistencyMetric(BaseMetric):
         for i in range(n_outputs):
             for j in range(i + 1, n_outputs):
                 is_consistent = self._judge_consistency(
-                    question=question,
+                    prompt=prompt,
                     reference_answer=outputs[i],
                     prediction=outputs[j],
                     prompt_template=prompt_template
@@ -67,14 +67,14 @@ class ConsistencyMetric(BaseMetric):
         return "consistency"
 
     def _judge_consistency(self, 
-                          question: str, 
+                          prompt: str, 
                           reference_answer: str, 
                           prediction: str,
                           prompt_template: str) -> bool:
         """Use LLM to judge if prediction is consistent with reference answer."""
         try:
             prompt = prompt_template.format(
-                question=question,
+                prompt=prompt,
                 reference_answer=reference_answer,
                 prediction=prediction
             )

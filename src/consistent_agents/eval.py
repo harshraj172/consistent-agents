@@ -140,23 +140,20 @@ def evaluate(
     metric_scores: Dict[str, Any] = {metric.name(): None for metric in metrics}
 
     for item in tqdm(benchmark.iter(), desc="Evaluating", unit="ex", total=len(benchmark)):
-        base_output = agent_fn(item["question"], item["env"])
-        item["base_output"] = base_output
+        base_output = agent_fn(item["prompt"], item["env"])
 
-    # for item in tqdm(items, desc="Evaluating", unit="ex"):
-    #     base_output = agent_fn(item.prompt, item.env)
         perts = generate_perturbations(
-            item["question"],
+            item["prompt"],
             perturb_fns,
             n=config.n_perturbations,
             seed=config.seed,
         )
         perturbed_outputs: List[Dict[str, Any]] = []
-        for p_type, p_text in perts:
-            out = agent_fn(p_text, item["env"])
+        for p_type, p_prompt in perts:
+            out = agent_fn(p_prompt, item["env"])
             perturbed_outputs.append({
                 "type": p_type,
-                "text": p_text,
+                "prompt": p_prompt,
                 "output": out,
             })
 
@@ -166,6 +163,7 @@ def evaluate(
         examples.append(
             ExampleResult(
                 id=item["id"],
+                base_prompt=item["prompt"],
                 base_output=base_output,
                 perturbed_outputs=perturbed_outputs,
                 **metric_scores,
@@ -224,21 +222,22 @@ def main(argv: Optional[List[str]] = None) -> int:
         "total": result.total,
         "consistency": result.consistency,
         "accuracy": result.accuracy,
-        "bertscore": result.bertscore,
-        "rouge": result.rouge,
-        "entailment": result.entailment,
-        "contradiction": result.contradiction,
+        # "bertscore": result.bertscore,
+        # "rouge": result.rouge,
+        # "entailment": result.entailment,
+        # "contradiction": result.contradiction,
         "examples": [
             {
                 "id": ex.id,
+                "base_prompt": ex.base_prompt,
                 "base_output": ex.base_output,
                 "perturbed_outputs": ex.perturbed_outputs,
                 "consistency": ex.consistency,
                 "accuracy": ex.accuracy,
-                "bertscore": ex.bertscore,
-                "rouge": ex.rouge,
-                "entailment": ex.entailment,
-                "contradiction": ex.contradiction,
+                # "bertscore": ex.bertscore,
+                # "rouge": ex.rouge,
+                # "entailment": ex.entailment,
+                # "contradiction": ex.contradiction,
             }
             for ex in result.examples
         ],

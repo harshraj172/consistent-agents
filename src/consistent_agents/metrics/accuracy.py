@@ -31,7 +31,7 @@ class AccuracyMetric(BaseMetric):
         prompt_template = Path(REPO_ROOT / "src" / "consistent_agents" / "metrics" / 
                               "prompt-templates" / "accuracy-judge.txt").read_text()
         
-        question = item["question"]
+        prompt = item["prompt"]
         correct_answers = getattr(item, 'correct_answers', [])
         incorrect_answers = getattr(item, 'incorrect_answers', [])
         
@@ -40,7 +40,7 @@ class AccuracyMetric(BaseMetric):
             prediction = perturbation['output']
             
             is_correct = self._judge_accuracy(
-                question=question,
+                prompt=prompt,
                 prediction=prediction,
                 correct_answers=correct_answers,
                 incorrect_answers=incorrect_answers,
@@ -67,7 +67,7 @@ class AccuracyMetric(BaseMetric):
         return "accuracy"
 
     def _judge_accuracy(self, 
-                       question: str, 
+                       prompt: str, 
                        prediction: str,
                        correct_answers: list,
                        incorrect_answers: list,
@@ -75,7 +75,7 @@ class AccuracyMetric(BaseMetric):
         """Use LLM to judge if prediction is accurate."""
         try:
             prompt = prompt_template.format(
-                question=question,
+                prompt=prompt,
                 prediction=prediction,
                 correct_answers=','.join(correct_answers),
                 incorrect_answers=','.join(incorrect_answers)

@@ -54,8 +54,6 @@ class DockerEnvironment(BaseEnvironment):
         
         self.container_id: Optional[str] = None
         self.docker_config = config_class(**kwargs)
-        
-        self.start()
 
     def get_template_vars(self) -> Dict[str, Any]:
         """Get configuration as dictionary for templating."""
@@ -108,7 +106,9 @@ class DockerEnvironment(BaseEnvironment):
 
             if container_name is None:
                 container_name = f"{uuid.uuid4().hex[:8]}"
-
+            
+            self.stop(container_name)
+            
             cmd = [
                 self.docker_config.executable,
                 "run",
@@ -151,15 +151,20 @@ class DockerEnvironment(BaseEnvironment):
             self.is_running = False
             return False
 
-    def stop(self) -> bool:
-        """Stop and remove the Docker container"""
-        if not self.is_running or self.container_id is None:
+    def stop(self, container_name) -> bool:
+        """Stop and remove the Docker container
+        
+        Args:
+            container_name: Optional container name. If not provided, deletes the container by ID.
+        """
+        if (not self.is_running or self.container_id is None) and container_name is None:
             self.logger.warning(f"Environment {self.name} is not running")
             return True
         
+        container_name_or_id = container_name if container_name else self.container_id
         try:
             # Try graceful stop first
-            stop_cmd = [self.docker_config.executable, "stop", self.container_id]
+            stop_cmd = [self.docker_config.executable, "stop", container_name_or_id]
             result = subprocess.run(
                 stop_cmd,
                 capture_output=True,
@@ -169,12 +174,16 @@ class DockerEnvironment(BaseEnvironment):
             
             if result.returncode != 0:
                 self.logger.warning(f"Graceful stop failed, forcing removal: {result.stderr}")
-                rm_cmd = [self.docker_config.executable, "rm", "-f", self.container_id]
+                rm_cmd = [self.docker_config.executable, "rm", "-f", container_name_or_id]
                 subprocess.run(rm_cmd, capture_output=True, text=True, timeout=30)
             
-            self.is_running = False
-            self.container_id = None
-            self.logger.info(f"Stopped environment {self.name}")
+            if container_name:
+                self.logger.info(f"Stopped container {container_name}")
+            else:
+                self.is_running = False
+                self.container_id = None
+                self.logger.info(f"Stopped environment {self.name}")
+                self.logger.info(f"Stopped container {container_name}")
             return True
             
         except Exception as e:

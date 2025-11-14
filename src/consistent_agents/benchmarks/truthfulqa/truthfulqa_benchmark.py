@@ -71,6 +71,7 @@ class TruthfulQABenchmark(BaseBenchmark):
             return self._prepared[idx]
 
         env = DockerEnvironment()
+        env.start()
         state = {"env": env}
         self._prepared[idx] = state
         return state
