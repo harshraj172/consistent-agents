@@ -120,13 +120,13 @@ class DefaultAgent:
                     raise Submitted()
                     
                 self.step()
-                self.steps += 1
 
             except NonTerminatingException as e:
                 self.add_message("user", str(e))
             except TerminatingException as e:
                 self.add_message("user", str(e))
                 return type(e).__name__, str(e)
+            self.steps += 1
     
     def initialize_messages(self) -> None:
         """Initialize the conversation with system and user prompts."""
@@ -169,13 +169,13 @@ class DefaultAgent:
     
     def parse_action(self, response: Dict[str, Any]) -> Dict[str, Any]:
         """Parse a bash action from the model's response."""
-        actions = re.findall(r"```(?:bash)?\s*\n(.*?)\n```", response["content"], re.DOTALL)
+        actions = re.findall(r"```(?:bash|shell)?\s*\n(.*?)\n```", response["content"], re.DOTALL)
         if len(actions) == 1:
             return {"action": actions[0].strip(), **response}
         raise FormatError(self.render_template(self.config.format_error_template, actions=actions))
     
     def has_finished(self, output: Dict[str, str]) -> None:
         """Check if the agent has completed its task."""
-        lines = output.get("output", "").lstrip()
-        if lines and "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in lines:
-            raise Submitted(lines.replace("COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT", ""))
+        lines = output.get("output", "").lstrip().splitlines(keepends=True)
+        if lines and lines[0].strip() in ["COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"]:
+            raise Submitted("".join(lines[1:]))

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from consistent_agents.environments import BaseEnvironment
@@ -20,18 +20,34 @@ class EvalConfig:
     seed: int = 42
 
 
-
 @dataclass
 class ExampleResult:
     id: str
     base_output: str
+    base_prompt: str
     perturbed_outputs: List[Dict[str, Any]]
     consistency: float
     accuracy: float
-    bertscore: float
-    rouge: float
-    entailment: float
-    contradiction: float
+
+
+@dataclass
+class AgentRunResult:
+    output: str
+    status: str
+    messages: List[Dict[str, Any]]
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class AgentTrajectory:
+    example_id: str
+    variant: str
+    prompt: str
+    output: str
+    status: str
+    messages: List[Dict[str, Any]]
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
 
 @dataclass
 class EvalResult:
@@ -39,8 +55,5 @@ class EvalResult:
     total: int
     consistency: float
     accuracy: float
-    bertscore: float
-    rouge: float
-    entailment: float
-    contradiction: float
     examples: List[ExampleResult]
+    trajectories: List[AgentTrajectory] = field(default_factory=list)

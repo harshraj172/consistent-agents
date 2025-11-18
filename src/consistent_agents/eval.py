@@ -1,21 +1,27 @@
 from __future__ import annotations
 
-import yaml
 import json
 import random
 import sys
-from tqdm.auto import tqdm
+import uuid
+from copy import deepcopy
 from dataclasses import asdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from consistent_agents.data_models import (BenchmarkItem,
-                                           EvalConfig, 
-                                           EvalResult, 
-                                           ExampleResult)
-from consistent_agents.metrics.base import BaseMetric
-from consistent_agents.utils import (resolve_object, 
-                                    maybe_instantiate)
+import yaml
+from tqdm.auto import tqdm
+
+from consistent_agents.data_models import (
+    AgentRunResult,
+    AgentTrajectory,
+    BenchmarkItem,
+    EvalConfig,
+    EvalResult,
+    ExampleResult,
+)
+from consistent_agents.utils import maybe_instantiate, resolve_object
 from consistent_agents.benchmarks import BaseBenchmark
 from consistent_agents.environments import BaseEnvironment
 
@@ -41,20 +47,6 @@ def load_benchmark_from_config(bm_cfg: Dict[str, Any]) -> Tuple[BaseBenchmark, L
         items.append(BenchmarkItem(id=ex_id, prompt=str(prompt), label=str(label) if label is not None else None, env=ex["env"]))
     return benchmark, items
 
-def load_metrics_from_config(metrics_cfg: List[Dict[str, Any]]) -> List[BaseMetric]:
-    """Load metrics from config and return instantiated metric objects."""
-    metrics = []
-    for metric_cfg in metrics_cfg:
-        path = metric_cfg.get("path")
-        params = metric_cfg.get("params", {})
-        if not path:
-            continue
-        
-        obj = resolve_object(path)
-        metric = maybe_instantiate(obj, params)
-        metrics.append(metric)
-    
-    return metrics
 # perturbation
 def _instantiate_perturbations(cfg_list: List[Dict[str, Any]]) -> List[Callable[[str], str]]:
     perts: List[Callable[[str], str]] = []
@@ -76,7 +68,7 @@ def _instantiate_perturbations(cfg_list: List[Dict[str, Any]]) -> List[Callable[
 
 def generate_perturbations(
     text: str,
-    perturb_fns: List[Tuple[Callable[[str], str]], Dict],
+    perturb_fns: List[Tuple[Callable[[str], str], Dict[str, Any]]],
     n: int,
     seed: int,
 ) -> List[Tuple[str, str]]:
@@ -93,8 +85,8 @@ def generate_perturbations(
 
 
 # agent
-def resolve_agent_callable(cfg: Dict[str, Any]) -> Callable[[str], str]:
-    """Resolve agent from config into a callable(prompt)"""
+def resolve_agent_callable(cfg: Dict[str, Any]) -> Callable[[str, BaseEnvironment], AgentRunResult]:
+    """Resolve agent from config into a callable(prompt, env) -> AgentRunResult."""
     path = cfg.get("path")
     params = cfg.get("params", {})
     if not path:
@@ -115,11 +107,34 @@ def resolve_agent_callable(cfg: Dict[str, Any]) -> Callable[[str], str]:
         instance = obj(model=model, **params)
 
         if hasattr(instance, "run") and callable(getattr(instance, "run")):
-            def _runner(prompt: str, env: BaseEnvironment) -> str:
+            def _runner(prompt: str, env: BaseEnvironment) -> AgentRunResult:
                 res = instance.run(prompt, env)
                 if isinstance(res, tuple) and res:
-                    return str(res[-1])
-                return str(res)
+                    status = str(res[0])
+                    output_text = str(res[-1])
+                else:
+                    status = "OK"
+                    output_text = str(res)
+
+                messages = deepcopy(instance.messages)
+                try:
+                    agent_config = asdict(instance.config)
+                except TypeError:
+                    agent_config = getattr(instance, "config", {})
+
+                metadata = {
+                    "agent_name": instance.__class__.__name__,
+                    "agent_config": agent_config,
+                    "model": instance.model.get_template_vars() if hasattr(instance.model, "get_template_vars") else {},
+                    "steps_taken": sum(1 for message in messages if message.get("role") == "assistant"),
+                }
+
+                return AgentRunResult(
+                    output=output_text,
+                    status=status,
+                    messages=messages,
+                    metadata=metadata,
+                )
 
             return _runner
 
@@ -130,56 +145,90 @@ def resolve_agent_callable(cfg: Dict[str, Any]) -> Callable[[str], str]:
 
 # Evaluation loop
 def evaluate(
-    benchmark: BaseBenchmark,
-    agent_fn: Callable[[str], str],
-    metrics: List[BaseMetric],
+    items: List[BenchmarkItem],
+    agent_fn: Callable[[str, BaseEnvironment], AgentRunResult],
+    score_fn: Callable[[str], dict],
     config: EvalConfig,
-    perturb_fns: List[Callable[[str], str]],
+    perturb_fns: List[Tuple[Callable[[str], str], Dict[str, Any]]],
 ) -> EvalResult:
     examples: List[ExampleResult] = []
-    metric_scores: Dict[str, Any] = {metric.name(): None for metric in metrics}
+    consistent_count, correct_count, total = 0, 0, 0
+    trajectories: List[AgentTrajectory] = []
 
-    for item in tqdm(benchmark.iter(), desc="Evaluating", unit="ex", total=len(benchmark)):
-        base_output = agent_fn(item["question"], item["env"])
-        item["base_output"] = base_output
-
-    # for item in tqdm(items, desc="Evaluating", unit="ex"):
-    #     base_output = agent_fn(item.prompt, item.env)
+    for item in tqdm(items, desc="Evaluating", unit="ex"):
+        base_result = agent_fn(item.prompt, item.env)
+        if isinstance(base_result, AgentRunResult):
+            base_output = base_result.output
+            trajectories.append(
+                AgentTrajectory(
+                    example_id=item.id,
+                    variant="base",
+                    prompt=item.prompt,
+                    output=base_output,
+                    status=base_result.status,
+                    messages=base_result.messages,
+                    metadata=dict(base_result.metadata),
+                )
+            )
+        else:
+            base_output = str(base_result)
         perts = generate_perturbations(
-            item["question"],
+            item.prompt,
             perturb_fns,
             n=config.n_perturbations,
             seed=config.seed,
         )
         perturbed_outputs: List[Dict[str, Any]] = []
         for p_type, p_text in perts:
-            out = agent_fn(p_text, item["env"])
+            pert_result = agent_fn(p_text, item.env)
+            if isinstance(pert_result, AgentRunResult):
+                out = pert_result.output
+                pert_metadata = dict(pert_result.metadata)
+                pert_metadata.setdefault("perturbation", p_type)
+                trajectories.append(
+                    AgentTrajectory(
+                        example_id=item.id,
+                        variant="perturbation",
+                        prompt=p_text,
+                        output=out,
+                        status=pert_result.status,
+                        messages=pert_result.messages,
+                        metadata=pert_metadata,
+                    )
+                )
+            else:
+                out = str(pert_result)
             perturbed_outputs.append({
                 "type": p_type,
-                "text": p_text,
+                "prompt": p_text,
                 "output": out,
             })
-
-        for metric in metrics:
-            metric_scores[metric.name()] = metric.item_score(item, perturbed_outputs=perturbed_outputs)
-
+        result = score_fn(
+            item.id, base_output, [po["output"] for po in perturbed_outputs]
+        )
+        consistent_count_per_row, correct_count_per_row, total_per_row = \
+            result["consistent_count"], result["correct_count"], result["total"]
+        correct_count += correct_count_per_row
+        consistent_count += consistent_count_per_row
+        total += total_per_row
         examples.append(
             ExampleResult(
-                id=item["id"],
+                id=item.id,
+                base_prompt=item.prompt,
                 base_output=base_output,
                 perturbed_outputs=perturbed_outputs,
-                **metric_scores,
+                consistency=consistent_count_per_row/total_per_row,
+                accuracy=correct_count_per_row/total_per_row,
             )
         )
 
-    total_score = {metric.name(): metric.total_score() for metric in metrics}
-
     return EvalResult(
         config=asdict(config),
-        total=len(examples),
+        consistency=consistent_count/total,
+        accuracy=correct_count/total,
+        total=total,
         examples=examples,
-        **total_score,
-
+        trajectories=trajectories,
     )
 
 
@@ -202,12 +251,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Benchmark
     benchmark, items = load_benchmark_from_config(raw_cfg.get("benchmark", {}))
+    score_fn = getattr(benchmark, "score")
     
     # Agent
     agent_fn = resolve_agent_callable(raw_cfg.get("agent", {}))
-
-    # Metrics
-    metrics = load_metrics_from_config(raw_cfg.get("metrics", []))
 
     # Perturbations
     perturb_cfgs = raw_cfg.get("perturbations", [])
@@ -217,43 +264,68 @@ def main(argv: Optional[List[str]] = None) -> int:
     perturb_fns = [(fn, cfg) for fn, cfg in zip(perturb_fns, perturb_cfgs)]
 
     # Evaluate
-    result = evaluate(benchmark, agent_fn, metrics, eval_cfg, perturb_fns)
+    result = evaluate(items, agent_fn, score_fn, eval_cfg, perturb_fns)
 
     payload = {
         "config": result.config,
         "total": result.total,
         "consistency": result.consistency,
         "accuracy": result.accuracy,
-        "bertscore": result.bertscore,
-        "rouge": result.rouge,
-        "entailment": result.entailment,
-        "contradiction": result.contradiction,
         "examples": [
             {
                 "id": ex.id,
+                "base_prompt": ex.base_prompt,
                 "base_output": ex.base_output,
                 "perturbed_outputs": ex.perturbed_outputs,
                 "consistency": ex.consistency,
                 "accuracy": ex.accuracy,
-                "bertscore": ex.bertscore,
-                "rouge": ex.rouge,
-                "entailment": ex.entailment,
-                "contradiction": ex.contradiction,
             }
             for ex in result.examples
         ],
     }
 
-    # Output
     out_path_str = raw_cfg.get("output", {}).get("path") or raw_cfg.get("out")
-    text = json.dumps(payload, ensure_ascii=False, indent=2)
+
     if out_path_str:
-        out_path = Path(out_path_str)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(text, encoding="utf-8")
-        print(f"Wrote results to {out_path}")
+        base_out = Path(out_path_str)
+        if base_out.suffix:
+            base_dir = base_out.parent
+            base_name = base_out.stem
+        else:
+            base_dir = base_out
+            base_name = base_out.name
+
+        if not base_name:
+            base_name = "results"
+
+        timestamp = datetime.now()
+        run_dir_name = f"{base_name}-{timestamp.strftime('%Y-%m-%d::%H-%M-%S')}"
+        run_dir = base_dir / run_dir_name
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        trajectory_filename = f"trajectory.json"
+        trajectory_path = run_dir / trajectory_filename
+        result_path = run_dir / "result.json"
+
+        payload["result_trajectory"] = trajectory_filename
+
+        result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        trajectory_payload = {
+            "created_at": timestamp.isoformat(),
+            "results_dir": run_dir_name,
+            "trajectory_file": trajectory_filename,
+            "trajectory_count": len(result.trajectories),
+            "entries": [asdict(entry) for entry in result.trajectories],
+        }
+        trajectory_path.write_text(
+            json.dumps(trajectory_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        print(f"Wrote results to {result_path} and trajectory log to {trajectory_path}")
     else:
-        print(text)
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
 
     return 0
 
