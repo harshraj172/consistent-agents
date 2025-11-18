@@ -6,7 +6,7 @@ import math
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from consistent_agents.data_models import EvalConfig
+from consistent_agents.data_models import AgentRunResult, EvalConfig
 from consistent_agents.eval import (
     _instantiate_perturbations,
     _load_config,
@@ -45,7 +45,8 @@ def _run_single_turn_eval(cfg_path: Path) -> Dict[str, Any]:
     example_payloads: List[Dict[str, Any]] = []
 
     for item in items:
-        base_output = agent_fn(item.prompt, item.env)
+        base_run = agent_fn(item.prompt, item.env)
+        base_output = base_run.output if isinstance(base_run, AgentRunResult) else base_run
         generated_perts = generate_perturbations(
             item.prompt,
             perturbations,
@@ -54,7 +55,8 @@ def _run_single_turn_eval(cfg_path: Path) -> Dict[str, Any]:
         )
         perturbed_outputs: List[Dict[str, Any]] = []
         for pert_type, pert_prompt in generated_perts:
-            pert_output = agent_fn(pert_prompt, item.env)
+            pert_run = agent_fn(pert_prompt, item.env)
+            pert_output = pert_run.output if isinstance(pert_run, AgentRunResult) else pert_run
             perturbed_outputs.append(
                 {
                     "type": pert_type,

@@ -149,7 +149,7 @@ class SWEBenchBenchmark(BaseBenchmark):
         state = self._prepared[idx]
         env = state["env"]
 
-        env.upload(str(state["tests_dir"]), "/tests")
+        env.upload(str(state["tests_dir"]), "/")
 
         base_passed = self._apply_patch_and_test(env, str(base_output))
         outcomes: List[bool] = [base_passed]

@@ -120,6 +120,7 @@ class DockerEnvironment(BaseEnvironment):
                 container_name = f"{uuid.uuid4().hex[:8]}"
             
             if self.is_container_running(container_name):
+                self.logger.debug(f"Container {container_name} is already running, stopping it first.")
                 self.stop(container_name)
             
             cmd = [
