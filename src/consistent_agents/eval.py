@@ -303,7 +303,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         run_dir = base_dir / run_dir_name
         run_dir.mkdir(parents=True, exist_ok=True)
 
-        trajectory_filename = f"trajectory-{uuid.uuid4().hex}.json"
+        trajectory_filename = f"trajectory.json"
         trajectory_path = run_dir / trajectory_filename
         result_path = run_dir / "result.json"
 

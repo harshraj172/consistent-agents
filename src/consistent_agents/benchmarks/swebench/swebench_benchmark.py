@@ -110,7 +110,7 @@ class SWEBenchBenchmark(BaseBenchmark):
         segment = output.split(START_MARKER, 1)[1].split(END_MARKER, 1)[0]
         return "PASSED" in segment
 
-    def _apply_patch_and_test(self, env, patch) -> bool:
+    def _apply_patch(self, env, patch) -> bool:
         solution_template = (self.template_dir / "solution.sh").read_text()
         script_contents = solution_template.replace("{patch}", patch)
 
@@ -126,18 +126,28 @@ class SWEBenchBenchmark(BaseBenchmark):
 
             apply_result = env.execute("bash /testbed/solution.sh false", cwd="/testbed", timeout=300)
             applied = apply_result.get("returncode", -1) == 0
+            return applied
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    def _run_tests(self, env) -> bool:
+        test_result = env.execute("bash /tests/run-tests.sh", timeout=3600)
+        passed = self._parse_test_output(test_result.get("stdout", ""))
+        return passed
+
+    def _apply_patch_and_test(self, env, patch) -> bool:
+        try:
+            applied = self._apply_patch(env, patch)
             if not applied:
                 return False
 
-            test_result = env.execute("bash /tests/run-tests.sh", timeout=3600)
-            passed = self._parse_test_output(test_result.get("stdout", ""))
+            passed = self._run_tests(env)
             return passed
         finally:
             try:
-                if uploaded:
-                    env.execute("bash /testbed/solution.sh true", cwd="/testbed", timeout=3600)
-            finally:
-                tmp_path.unlink(missing_ok=True)
+                env.execute("bash /testbed/solution.sh true", cwd="/testbed", timeout=3600)
+            except:
+                pass
     
     def score(
         self,

@@ -176,5 +176,6 @@ class DefaultAgent:
     
     def has_finished(self, output: Dict[str, str]) -> None:
         """Check if the agent has completed its task."""
-        lines = output.get("output", "").lstrip()
-        raise Submitted(lines.replace("COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT", ""))
+        lines = output.get("output", "").lstrip().splitlines(keepends=True)
+        if lines and lines[0].strip() in ["COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"]:
+            raise Submitted("".join(lines[1:]))
