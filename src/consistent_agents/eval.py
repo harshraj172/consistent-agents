@@ -144,7 +144,7 @@ def resolve_agent_callable(cfg: Dict[str, Any]) -> Callable[[str, BaseEnvironmen
 def evaluate(
     items: List[BenchmarkItem],
     agent_fn: Callable[[str, BaseEnvironment], AgentRunResult],
-    score_fn: Callable[[str], dict],
+    benchmark: BaseBenchmark,
     config: EvalConfig,
     perturb_fns: List[Tuple[Callable[[str], str], Dict[str, Any]]],
 ) -> EvalResult:
@@ -200,30 +200,24 @@ def evaluate(
                 "prompt": p_text,
                 "output": out,
             })
-        result = score_fn(
+        benchmark.score(
             item.id, base_output, [po["output"] for po in perturbed_outputs]
         )
-        consistent_count_per_row, correct_count_per_row, total_per_row = \
-            result["consistent_count"], result["correct_count"], result["total"]
-        correct_count += correct_count_per_row
-        consistent_count += consistent_count_per_row
-        total += total_per_row
+        item_score = benchmark.item_score()
         examples.append(
             ExampleResult(
                 id=item.id,
                 base_prompt=item.prompt,
                 base_output=base_output,
                 perturbed_outputs=perturbed_outputs,
-                consistency=consistent_count_per_row/total_per_row,
-                accuracy=correct_count_per_row/total_per_row,
+                **item_score,
             )
         )
 
+    total_score = benchmark.total_score()
     return EvalResult(
         config=asdict(config),
-        consistency=consistent_count/total,
-        accuracy=correct_count/total,
-        total=total,
+        **total_score,
         examples=examples,
         trajectories=trajectories,
     )
@@ -248,7 +242,6 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Benchmark
     benchmark, items = load_benchmark_from_config(raw_cfg.get("benchmark", {}))
-    score_fn = getattr(benchmark, "score")
     
     # Agent
     agent_fn = resolve_agent_callable(raw_cfg.get("agent", {}))
@@ -261,7 +254,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     perturb_fns = [(fn, cfg) for fn, cfg in zip(perturb_fns, perturb_cfgs)]
 
     # Evaluate
-    result = evaluate(items, agent_fn, score_fn, eval_cfg, perturb_fns)
+    result = evaluate(items, agent_fn, benchmark, eval_cfg, perturb_fns)
 
     payload = {
         "config": result.config,
