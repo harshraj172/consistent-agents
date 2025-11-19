@@ -45,6 +45,13 @@ class TruthfulQABenchmark(BaseBenchmark):
             )
         self.judge_model = judge_model
         self.client = OpenAI()
+
+        self.item_scores: Dict[int, Dict[str, float]] = {}
+        self.total_scores: Dict[str, int] = {
+            "consistent_count": 0,
+            "correct_count": 0,
+            "total": 0,
+        }
         
     def load(self) -> None:
         """
@@ -93,12 +100,29 @@ class TruthfulQABenchmark(BaseBenchmark):
     
     def score(self, idx: int, base_output: str, predictions: List[Any]) -> Dict[str, float]:
         """Calculate scores for TruthfulQA predictions."""
-        return {
-            "consistent_count": self._score_consistency(idx, predictions),
-            "correct_count": self._score_accuracy(idx, predictions),
-            "total":  len(predictions) * (len(predictions) - 1) // 2
+        consistent_count = self._score_consistency(idx, predictions)
+        correct_count = self._score_accuracy(idx, predictions)
+        total = len(predictions) * (len(predictions) - 1) // 2
+        self.item_scores = {
+            "consistent_count": consistent_count,
+            "correct_count": correct_count,
+            "total": total,
         }
+        self.total_scores["consistent_count"] += consistent_count
+        self.total_scores["correct_count"] += correct_count
+        self.total_scores["total"] += total
 
+    def item_score(self) -> Dict[str, float]:
+        """Get the scores for a specific item."""
+        return {"consistency": self.item_scores["consistent_count"] / self.item_scores["total"],
+                "accuracy": self.item_scores["correct_count"] / self.item_scores["total"]}
+    
+    def total_score(self) -> Dict[str, float]:
+        """Get the total scores for the benchmark."""
+        return {"consistency": self.total_scores["consistent_count"] / self.total_scores["total"],
+                "accuracy": self.total_scores["correct_count"] / self.total_scores["total"],
+                "total": self.total_scores["total"]}
+    
     def _score_accuracy(self, idx: int, predictions: List[str]) -> int:
         """Score generation predictions using LLM-as-judge"""
         

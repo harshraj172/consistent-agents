@@ -34,6 +34,12 @@ class SWEBenchBenchmark(BaseBenchmark):
         self._prepared: Dict[int, Dict] = {}
         self.template_dir = Path(__file__).parent / "template"
 
+        self.item_scores: Dict[str, float] = {}
+        self.total_scores: Dict[str, int] = {
+            "correct_count": 0,
+            "total": 0,
+        }
+
     def load(self) -> None:
         """Load the SWEBench dataset from HuggingFace."""
         self.dataset = datasets.load_dataset(
@@ -168,14 +174,26 @@ class SWEBenchBenchmark(BaseBenchmark):
             pred_passed = self._apply_patch_and_test(env, str(prediction))
             outcomes.append(pred_passed)
 
-        consistent_count = correct_count = sum(1 for passed in outcomes if passed)
+        correct_count = sum(1 for passed in outcomes if passed)
         total = len(outcomes) if outcomes else 1
 
-        return {
-            "consistent_count": consistent_count,
+        self.item_scores = {
             "correct_count": correct_count,
             "total": total,
-            "base_passed": float(base_passed),
+        }
+        self.total_scores["correct_count"] += correct_count
+        self.total_scores["total"] += total
+
+
+    def item_score(self) -> Dict[str, float]:
+        """Get the scores for a specific item."""
+        return {"accuracy": self.item_scores["correct_count"] / self.item_scores["total"]}
+    
+    def total_score(self) -> Dict[str, float]:
+        """Get the total scores for the benchmark."""
+        return {
+            "accuracy": self.total_scores["correct_count"] / self.total_scores["total"],
+            "total": self.total_scores["total"],
         }
 
     def __len__(self) -> int:
