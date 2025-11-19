@@ -1,10 +1,13 @@
 from pathlib import Path
-from itertools import combinations
 from typing import Iterator, Dict, Any, List, Optional
 
 import datasets
 from consistent_agents.benchmarks.base import BaseBenchmark
 from consistent_agents.environments import DockerEnvironment
+from consistent_agents.metrics.accuracy import score as accuracy_score
+from consistent_agents.metrics.consistency import score as consistency_score
+from consistent_agents.metrics.entailment import score as entailment_score
+from consistent_agents.metrics.contradiction import score as contradiction_score
 
 
 class TruthfulQABenchmark(BaseBenchmark):
@@ -49,7 +52,10 @@ class TruthfulQABenchmark(BaseBenchmark):
         self.item_scores: Dict[int, Dict[str, float]] = {}
         self.total_scores: Dict[str, int] = {
             "consistent_count": 0,
-            "correct_count": 0,
+            "accuracy_count": 0,
+            "entailment_count": 0,
+            "contradiction_count": 0,
+            "total_pairs": 0,
             "total": 0,
         }
         
@@ -98,102 +104,91 @@ class TruthfulQABenchmark(BaseBenchmark):
                 "env": state["env"],
             }
     
-    def score(self, idx: int, base_output: str, predictions: List[Any]) -> Dict[str, float]:
+    def score(self, idx: int, base_output: str, predictions: List[str]) -> Dict[str, float]:
         """Calculate scores for TruthfulQA predictions."""
-        consistent_count = self._score_consistency(idx, predictions)
-        correct_count = self._score_accuracy(idx, predictions)
-        total = len(predictions) * (len(predictions) - 1) // 2
-        self.item_scores = {
-            "consistent_count": consistent_count,
-            "correct_count": correct_count,
-            "total": total,
-        }
-        self.total_scores["consistent_count"] += consistent_count
-        self.total_scores["correct_count"] += correct_count
-        self.total_scores["total"] += total
-
-    def item_score(self) -> Dict[str, float]:
-        """Get the scores for a specific item."""
-        return {"consistency": self.item_scores["consistent_count"] / self.item_scores["total"],
-                "accuracy": self.item_scores["correct_count"] / self.item_scores["total"]}
-    
-    def total_score(self) -> Dict[str, float]:
-        """Get the total scores for the benchmark."""
-        return {"consistency": self.total_scores["consistent_count"] / self.total_scores["total"],
-                "accuracy": self.total_scores["correct_count"] / self.total_scores["total"],
-                "total": self.total_scores["total"]}
-    
-    def _score_accuracy(self, idx: int, predictions: List[str]) -> int:
-        """Score generation predictions using LLM-as-judge"""
-        
-        # Load prompt template
-        prompt_template = Path(self.template_dir / "truthfulqa-accuracy-judge.txt").read_text()
-        correct_count = 0
-        
         row = self.dataset[idx]
         question = row["question"]
         correct_answers = row.get("correct_answers", [])
         incorrect_answers = row.get("incorrect_answers", [])
-        for prediction in predictions:
-            prompt = prompt_template.format(
-                question=question,
-                prediction=prediction,
-                correct_answers=','.join(correct_answers),
-                incorrect_answers=','.join(incorrect_answers)
-            )
-            is_correct = self._judge_answers(
-                prompt=prompt,
-            )
-            if is_correct:
-                correct_count += 1
+        
+        total_pairs = len(predictions) * (len(predictions) - 1) // 2
+        total_predictions = len(predictions)
+        
+        # Calculate consistency score (pairwise)
+        consistency_proportion = consistency_score(
+            outputs=predictions,
+            question=question,
+            agreement="llm_judge",
+            agreement_params={"judge_model": self.judge_model},
+            aggregator="pairwise"
+        )
+        consistent_count = int(consistency_proportion * total_pairs)
+        
+        # Calculate accuracy score
+        accuracy_proportion = accuracy_score(
+            question=question,
+            predictions=predictions,
+            correct_answers=correct_answers,
+            incorrect_answers=incorrect_answers,
+            judge_model=self.judge_model
+        )
+        accuracy_count = int(accuracy_proportion * total_predictions)
+        
+        # Calculate entailment score
+        entailment_proportion = entailment_score(
+            base_output=base_output,
+            predictions=predictions,
+            judge_model=self.judge_model
+        )
+        entailment_count = int(entailment_proportion * total_predictions)
+        
+        # Calculate contradiction score (non-contradiction)
+        contradiction_proportion = contradiction_score(
+            base_output=base_output,
+            predictions=predictions,
+            judge_model=self.judge_model
+        )
+        contradiction_count = int(contradiction_proportion * total_predictions)
+        
+        self.item_scores = {
+            "consistent_count": consistent_count,
+            "accuracy_count": accuracy_count,
+            "entailment_count": entailment_count,
+            "contradiction_count": contradiction_count,
+            "total_pairs": total_pairs,
+            "total_predictions": total_predictions,
+        }
+        self.total_scores["consistent_count"] += consistent_count
+        self.total_scores["accuracy_count"] += accuracy_count
+        self.total_scores["entailment_count"] += entailment_count
+        self.total_scores["contradiction_count"] += contradiction_count
+        self.total_scores["total_pairs"] += total_pairs
+        self.total_scores["total"] += total_predictions
+
+    def item_score(self) -> Dict[str, float]:
+        """Get the scores for a specific item."""
+        total_pairs = self.item_scores.get("total_pairs", 1)
+        total_predictions = self.item_scores.get("total_predictions", 1)
+        
+        return {
+            "consistency": self.item_scores["consistent_count"] / total_pairs if total_pairs > 0 else 0.0,
+            "accuracy": self.item_scores["accuracy_count"] / total_predictions if total_predictions > 0 else 0.0,
+            "entailment": self.item_scores["entailment_count"] / total_predictions if total_predictions > 0 else 0.0,
+            "contradiction": self.item_scores["contradiction_count"] / total_predictions if total_predictions > 0 else 0.0,
+        }
     
-        return correct_count
+    def total_score(self) -> Dict[str, float]:
+        """Get the total scores for the benchmark."""
+        total_pairs = self.total_scores.get("total_pairs", 1)
+        total = self.total_scores["total"]
         
-    def _score_consistency(self, 
-            idx: int, 
-            predictions: List[Dict[str, List[str]]]) -> Dict[str, float]:
-        """Score generation predictions using LLM-as-judge."""
-        
-        prompt_template = Path(self.template_dir / "truthfulqa-consistency-judge.txt").read_text()
-        consistent_count = 0
-        
-        row = self.dataset[idx]
-        pairs = list(combinations(predictions, 2))
-        for (prediction1, prediction2) in pairs:
-            prompt = prompt_template.format(
-                question=row["question"],
-                prediction1=prediction1,
-                prediction2=prediction2
-            )
-            is_same = self._judge_answers(
-                prompt=prompt
-            )
-            if is_same:
-                consistent_count += 1
-        
-        return consistent_count
-    
-    def _judge_answers(self, prompt: str) -> bool:
-        """Use LLM to judge if prediction matches the reference answer"""
-        try:
-            response = self.client.chat.completions.create(
-                model=self.judge_model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                temperature=0.1,
-                max_tokens=10
-            )
-            
-            judgment = response.choices[0].message.content.strip()
-            return judgment.lower().startswith('yes')
-            
-        except Exception as e:
-            print(f"Error during LLM judging: {e}")
-            return False
+        return {
+            "consistency": self.total_scores["consistent_count"] / total_pairs if total_pairs > 0 else 0.0,
+            "accuracy": self.total_scores["accuracy_count"] / total if total > 0 else 0.0,
+            "entailment": self.total_scores["entailment_count"] / total if total > 0 else 0.0,
+            "contradiction": self.total_scores["contradiction_count"] / total if total > 0 else 0.0,
+            "total": total
+        }
         
     def __len__(self) -> int:
         """Return the number of examples in the dataset."""

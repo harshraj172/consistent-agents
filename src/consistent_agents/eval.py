@@ -258,17 +258,25 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     payload = {
         "config": result.config,
-        "total": result.total,
-        "consistency": result.consistency,
-        "accuracy": result.accuracy,
+        **{k: v for k, v in {
+            "total": result.total,
+            "consistency": result.consistency,
+            "accuracy": result.accuracy,
+            "entailment": result.entailment,
+            "contradiction": result.contradiction,
+        }.items() if v is not None},
         "examples": [
             {
                 "id": ex.id,
                 "base_prompt": ex.base_prompt,
                 "base_output": ex.base_output,
                 "perturbed_outputs": ex.perturbed_outputs,
-                "consistency": ex.consistency,
-                "accuracy": ex.accuracy,
+                **{k: v for k, v in {
+                    "consistency": ex.consistency,
+                    "accuracy": ex.accuracy,
+                    "entailment": ex.entailment,
+                    "contradiction": ex.contradiction,
+                }.items() if v is not None},
             }
             for ex in result.examples
         ],
