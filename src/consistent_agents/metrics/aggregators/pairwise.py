@@ -36,5 +36,5 @@ def pairwise(
             total_agreement += score
             total_pairs += 1
     
-    return total_agreement / total_pairs if total_pairs > 0 else 0.0
+    return total_agreement, total_pairs
 
