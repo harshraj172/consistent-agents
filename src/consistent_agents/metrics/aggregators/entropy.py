@@ -1,6 +1,6 @@
 from typing import List, Optional
 import numpy as np
-from scipy.stats import entropy
+from scipy.stats import entropy as scipy_entropy
 from typing import Callable
 
 __all__ = ["entropy", "semantic_clustering"]
@@ -38,7 +38,7 @@ def entropy(
     
     cluster_sizes = np.array([len(c) for c in clusters])
     pk = cluster_sizes / cluster_sizes.sum()
-    H = entropy(pk, base=2)
+    H = scipy_entropy(pk, base=2)
     
     return H
 

@@ -1,11 +1,13 @@
 from typing import Dict, Any, List, Optional, Callable
-from consistent_agents.metrics.agreement_functions import llm_judge, bertscore, rouge
+from consistent_agents.metrics.agreement_functions import consistency, contradiction, entailment, bertscore, rouge
 from consistent_agents.metrics.aggregators.pairwise import pairwise
 from consistent_agents.metrics.aggregators.entropy import entropy
 
 # Mapping from string names to agreement functions
 AGREEMENT_FUNCTIONS = {
-    "llm_judge": llm_judge,
+    "consistency": consistency,
+    "contradiction": contradiction,
+    "entailment": entailment,
     "bertscore": bertscore,
     "rouge": rouge,
 }
@@ -20,7 +22,7 @@ AGGREGATORS = {
 def score(
     outputs: List[str],
     question: Optional[str] = None,
-    agreement: str = "llm_judge",
+    agreement: str = "consistency",
     agreement_params: Optional[Dict[str, Any]] = None,
     aggregator: str = "pairwise",
     aggregator_params: Optional[Dict[str, Any]] = None,
@@ -35,7 +37,7 @@ def score(
     Args:
         outputs: List of output strings to evaluate
         question: Optional question context (passed to agreement function)
-        agreement: Name of agreement function. Options: "llm_judge", "bertscore", "rouge"
+        agreement: Name of agreement function. Options: "consistency", "contradiction", "entailment", "bertscore", "rouge"
         agreement_params: Parameters for agreement function (e.g., judge_model, model_type).
         aggregator: Name of aggregator. Options: "pairwise", "entropy"
         aggregator_params: Parameters for aggregator instantiation.

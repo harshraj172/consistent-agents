@@ -40,25 +40,24 @@ class TruthfulQABenchmark(BaseBenchmark):
         if task not in ["generation"]:
             raise ValueError(f"Task must be 'generation', got {task}")
         
-        try:
-            from openai import OpenAI
-        except ImportError:
-            raise ImportError(
-                "OpenAI package not installed. Install with: pip install openai"
-            )
+        from openai import OpenAI
         self.judge_model = judge_model
         self.client = OpenAI()
 
-        self.item_scores: Dict[int, Dict[str, float]] = {}
-        self.total_scores: Dict[str, int] = {
-            "consistent_count": 0,
-            "accuracy_count": 0,
-            "entailment_count": 0,
-            "contradiction_count": 0,
-            "total_pairs": 0,
-            "total": 0,
+        self.item_scores: Dict[str, Any] = {}
+
+        self.total_scores = {
+            "accuracy": None,
+            "consistency": None,
+            "total":0
         }
-        
+
+        self.consistency_configs = [
+            ("consistency", "pairwise"),
+            ("contradiction", "pairwise"),
+            ("entailment", "pairwise"),
+        ]
+
     def load(self) -> None:
         """
         Load the TruthfulQA dataset from HuggingFace datasets.
@@ -70,20 +69,17 @@ class TruthfulQABenchmark(BaseBenchmark):
                 split=self.split, 
                 cache_dir=self.data_dir
             )
-            print(f"Loaded TruthfulQA ({self.task}) {self.split} split with {len(self.dataset)} examples")
         except Exception as e:
             raise RuntimeError(f"Failed to load TruthfulQA dataset: {e}")
     
     def format_prompt(self, question: str) -> str:
         """Format the prompt for generation evaluation."""
-        prompt = f"Question: {question}\nAnswer:"
-        return prompt
+        return f"Question: {question}\nAnswer:"
     
     def _prepare_instance(self, idx: int, example: Dict[str, Any]) -> Dict[str, Any]:
         """Prepare environment for a TruthfulQA example."""
         if idx in self._prepared:
             return self._prepared[idx]
-
         env = DockerEnvironment()
         env.start()
         state = {"env": env}
@@ -111,85 +107,80 @@ class TruthfulQABenchmark(BaseBenchmark):
         correct_answers = row.get("correct_answers", [])
         incorrect_answers = row.get("incorrect_answers", [])
         
-        total_pairs = len(predictions) * (len(predictions) - 1) // 2
         total_predictions = len(predictions)
         
-        # Calculate consistency score (pairwise)
-        consistency_proportion = consistency_score(
-            outputs=predictions,
-            question=question,
-            agreement="llm_judge",
-            agreement_params={"judge_model": self.judge_model},
-            aggregator="pairwise"
-        )
-        consistent_count = int(consistency_proportion * total_pairs)
+        consistency_results = {}
+        for agreement, aggregator in self.consistency_configs:
+            params = {"judge_model": self.judge_model} if agreement in ["consistency", "contradiction", "entailment"] else {}
+            proportion = consistency_score(
+                outputs=predictions,
+                question=question,
+                agreement=agreement,
+                agreement_params=params,
+                aggregator=aggregator
+            )
+            if aggregator == "pairwise":
+                score, total_pairs = proportion
+            else:
+                score, total_pairs = proportion, 1
+            key = f"{agreement}_{aggregator}"
+            consistency_results[key] = {"score": score, "total_pairs": total_pairs}
         
-        # Calculate accuracy score
-        accuracy_proportion = accuracy_score(
+        accuracy_count, accuracy_pairs = accuracy_score(
             question=question,
             predictions=predictions,
             correct_answers=correct_answers,
             incorrect_answers=incorrect_answers,
             judge_model=self.judge_model
         )
-        accuracy_count = int(accuracy_proportion * total_predictions)
-        
-        # Calculate entailment score
-        entailment_proportion = entailment_score(
-            base_output=base_output,
-            predictions=predictions,
-            judge_model=self.judge_model
-        )
-        entailment_count = int(entailment_proportion * total_predictions)
-        
-        # Calculate contradiction score (non-contradiction)
-        contradiction_proportion = contradiction_score(
-            base_output=base_output,
-            predictions=predictions,
-            judge_model=self.judge_model
-        )
-        contradiction_count = int(contradiction_proportion * total_predictions)
         
         self.item_scores = {
-            "consistent_count": consistent_count,
-            "accuracy_count": accuracy_count,
-            "entailment_count": entailment_count,
-            "contradiction_count": contradiction_count,
-            "total_pairs": total_pairs,
-            "total_predictions": total_predictions,
+            "accuracy": {"accuracy_count": accuracy_count, "accuracy_pairs": accuracy_pairs},
+            "consistency":consistency_results,
+            "total": total_predictions,
         }
-        self.total_scores["consistent_count"] += consistent_count
-        self.total_scores["accuracy_count"] += accuracy_count
-        self.total_scores["entailment_count"] += entailment_count
-        self.total_scores["contradiction_count"] += contradiction_count
-        self.total_scores["total_pairs"] += total_pairs
-        self.total_scores["total"] += total_predictions
+        self._update_totals()
 
-    def item_score(self) -> Dict[str, float]:
+    
+    def item_score(self) -> Dict[str, Any]:
         """Get the scores for a specific item."""
-        total_pairs = self.item_scores.get("total_pairs", 1)
-        total_predictions = self.item_scores.get("total_predictions", 1)
-        
+
+        accuracy = self.item_scores["accuracy"]["accuracy_count"] / self.item_scores["accuracy"]["accuracy_pairs"]
+        consistency = {}
+        for key, result in self.item_scores["consistency"].items():
+            consistency[f'{key}'] = result["score"] / result["total_pairs"]
         return {
-            "consistency": self.item_scores["consistent_count"] / total_pairs if total_pairs > 0 else 0.0,
-            "accuracy": self.item_scores["accuracy_count"] / total_predictions if total_predictions > 0 else 0.0,
-            "entailment": self.item_scores["entailment_count"] / total_predictions if total_predictions > 0 else 0.0,
-            "contradiction": self.item_scores["contradiction_count"] / total_predictions if total_predictions > 0 else 0.0,
+            "accuracy": accuracy,
+            "consistency": consistency
         }
     
-    def total_score(self) -> Dict[str, float]:
+    def total_score(self) -> Dict[str, Any]:
         """Get the total scores for the benchmark."""
-        total_pairs = self.total_scores.get("total_pairs", 1)
-        total = self.total_scores["total"]
-        
+        accuracy = self.total_scores["accuracy"]["accuracy_count"] / self.total_scores["accuracy"]["accuracy_pairs"]
+        consistency = {}
+        for key, result in self.total_scores["consistency"].items():
+            consistency[f'{key}'] = result["score"] / result["total_pairs"]
         return {
-            "consistency": self.total_scores["consistent_count"] / total_pairs if total_pairs > 0 else 0.0,
-            "accuracy": self.total_scores["accuracy_count"] / total if total > 0 else 0.0,
-            "entailment": self.total_scores["entailment_count"] / total if total > 0 else 0.0,
-            "contradiction": self.total_scores["contradiction_count"] / total if total > 0 else 0.0,
-            "total": total
+            "accuracy": accuracy,
+            "consistency": consistency,
+            "total": self.total_scores["total"]
         }
+
+    def _update_totals(self):
+        if self.total_scores["accuracy"] is None:
+            self.total_scores["accuracy"] = self.item_scores["accuracy"]
+        else:
+            self.total_scores["accuracy"]["accuracy_pairs"] += self.item_scores["accuracy"]["accuracy_pairs"]
+            self.total_scores["accuracy"]["accuracy_count"] += self.item_scores["accuracy"]["accuracy_count"]
         
+        if self.total_scores["consistency"] is None:
+            self.total_scores["consistency"] = self.item_scores["consistency"]
+        else:
+            for key, result in self.item_scores["consistency"].items():
+                self.total_scores["consistency"][key]["score"] += result["score"]
+                self.total_scores["consistency"][key]["total_pairs"] += result["total_pairs"]
+        
+        self.total_scores["total"] += self.item_scores["total"]
     def __len__(self) -> int:
         """Return the number of examples in the dataset."""
         if self.dataset is None:

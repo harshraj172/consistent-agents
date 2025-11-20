@@ -23,8 +23,8 @@ def score(
     Returns:
         Accuracy score between 0.0 and 1.0 (fraction of correct predictions)
     """
-    prompt_template = Path(REPO_ROOT / "src" / "consistent_agents" / "metrics" / 
-                          "prompt-templates" / "accuracy-judge.txt").read_text()
+    prompt_template = Path(REPO_ROOT / "src" / "consistent_agents" / "benchmarks" / "truthfulqa" / 
+                          "prompt-templates" / "truthfulqa-accuracy-judge.txt").read_text()
     
     correct_count = 0
     for prediction in predictions:
@@ -41,17 +41,10 @@ def score(
             correct_count += 1
     
     total_predictions = len(predictions)
-    return correct_count / total_predictions if total_predictions > 0 else 0.0
+    return correct_count, total_predictions
 
 
-def _judge_accuracy(
-    question: str,
-    prediction: str,
-    correct_answers: List[str],
-    incorrect_answers: List[str],
-    prompt_template: str,
-    judge_model: str = "gpt-4o-mini",
-) -> bool:
+def _judge_accuracy(question: str, prediction: str, correct_answers: List[str], incorrect_answers: List[str], prompt_template: str, judge_model: str = "gpt-4o-mini") -> bool:
     """Use LLM to judge if prediction is accurate.
     
     Args:
