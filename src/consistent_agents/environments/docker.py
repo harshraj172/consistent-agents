@@ -78,10 +78,14 @@ class DockerEnvironment(BaseEnvironment):
             dockerfile_path: Optional Dockerfile path. If provided, builds image from this Dockerfile.
             container_name: Optional container name. If not provided, generates a random name.
         """
-        if self.is_running:
-            self.logger.warning(f"Environment {self.name} is already running")
-            return True
+        # if self.is_running:
+        #     self.logger.warning(f"Environment {self.name} is already running")
+        #     return True
 
+        if self.is_container_running(container_name):
+            self.logger.debug(f"Container {container_name} is already running, stopping it first.")
+            self.stop(container_name)
+            
         try:
             image_to_use = self.docker_config.image
 
@@ -118,10 +122,6 @@ class DockerEnvironment(BaseEnvironment):
 
             if container_name is None:
                 container_name = f"{uuid.uuid4().hex[:8]}"
-            
-            if self.is_container_running(container_name):
-                self.logger.debug(f"Container {container_name} is already running, stopping it first.")
-                self.stop(container_name)
             
             cmd = [
                 self.docker_config.executable,
