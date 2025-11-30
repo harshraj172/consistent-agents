@@ -144,9 +144,15 @@ class TruthfulQABenchmark(BaseBenchmark):
         """Get the scores for a specific item."""
 
         accuracy = self.item_scores["accuracy"]["accuracy_count"] / self.item_scores["accuracy"]["accuracy_pairs"]
-        consistency = {}
+        consistency = []
         for key, result in self.item_scores["consistency"].items():
-            consistency[f'{key}'] = result["score"] / result["total_pairs"]
+            agreement, aggregator = key.split("_", 1)  # Split "consistency_pairwise" into ("consistency", "pairwise")
+            score = result["score"] / result["total_pairs"]
+            consistency.append({
+                "aggregator": aggregator,
+                "agreement_function": agreement,
+                "score": score
+            })
         return {
             "accuracy": accuracy,
             "consistency": consistency
@@ -155,9 +161,15 @@ class TruthfulQABenchmark(BaseBenchmark):
     def total_score(self) -> Dict[str, Any]:
         """Get the total scores for the benchmark."""
         accuracy = self.total_scores["accuracy"]["accuracy_count"] / self.total_scores["accuracy"]["accuracy_pairs"]
-        consistency = {}
+        consistency = []
         for key, result in self.total_scores["consistency"].items():
-            consistency[f'{key}'] = result["score"] / result["total_pairs"]
+            agreement, aggregator = key.split("_", 1)  # Split "consistency_pairwise" into ("consistency", "pairwise")
+            score = result["score"] / result["total_pairs"]
+            consistency.append({
+                "aggregator": aggregator,
+                "agreement_function": agreement,
+                "score": score
+            })
         return {
             "accuracy": accuracy,
             "consistency": consistency,
