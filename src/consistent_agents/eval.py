@@ -262,8 +262,6 @@ def main(argv: Optional[List[str]] = None) -> int:
             "total": result.total,
             "consistency": result.consistency,
             "accuracy": result.accuracy,
-            "entailment": result.entailment,
-            "contradiction": result.contradiction,
         }.items() if v is not None},
         "examples": [
             {
@@ -274,8 +272,6 @@ def main(argv: Optional[List[str]] = None) -> int:
                 **{k: v for k, v in {
                     "consistency": ex.consistency,
                     "accuracy": ex.accuracy,
-                    "entailment": ex.entailment,
-                    "contradiction": ex.contradiction,
                 }.items() if v is not None},
             }
             for ex in result.examples
