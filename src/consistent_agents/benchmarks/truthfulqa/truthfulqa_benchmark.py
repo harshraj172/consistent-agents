@@ -6,8 +6,6 @@ from consistent_agents.benchmarks.base import BaseBenchmark
 from consistent_agents.environments import DockerEnvironment
 from consistent_agents.metrics.accuracy import score as accuracy_score
 from consistent_agents.metrics.consistency import score as consistency_score
-from consistent_agents.metrics.entailment import score as entailment_score
-from consistent_agents.metrics.contradiction import score as contradiction_score
 
 
 class TruthfulQABenchmark(BaseBenchmark):

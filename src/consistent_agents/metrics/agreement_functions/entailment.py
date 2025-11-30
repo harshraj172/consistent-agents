@@ -1,12 +1,83 @@
 from pathlib import Path
 from typing import Optional
+import torch
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 
-__all__ = ["entailment"]
+__all__ = ["entailment", "entailment_bert", "entailment_openai"]
+
+from consistent_agents.models.bertnli import get_bert_nli_model
 
 
 def entailment(
+    output1: str,
+    output2: str,
+    question: Optional[str] = None,
+    judge_model: str = "microsoft/deberta-base-mnli",
+    prompt_template_path: Optional[Path] = None,
+    **kwargs
+) -> float:
+    """
+    Wrapper function for entailment that routes to BERT or OpenAI based on judge_model.
+    If judge_model is microsoft/deberta-base-mnli (default BERT option), uses entailment_bert.
+    If judge_model is gpt-5 or other OpenAI models, uses entailment_openai.
+    
+    Args:
+        output1: First output text (sentence A)
+        output2: Second output text (sentence B)
+        question: Ignored (not used by entailment judge)
+        judge_model: Model to use for judging (default: "microsoft/deberta-base-mnli")
+        prompt_template_path: Optional path to prompt template. If None, uses default.
+        **kwargs: Additional context (e.g., prompt_template to override default)
+        
+    Returns:
+        1.0 if mutually entailed, 0.0 otherwise
+    """
+    if judge_model == "microsoft/deberta-base-mnli":
+        return entailment_bert(
+            output1=output1,
+            output2=output2,
+            question=question,
+            judge_model=judge_model,
+            **kwargs
+        )
+    else:
+        return entailment_openai(
+            output1=output1,
+            output2=output2,
+            question=question,
+            judge_model=judge_model,
+            prompt_template_path=prompt_template_path,
+            **kwargs
+        )
+
+
+def entailment_bert(
+    output1: str,
+    output2: str,
+    question: Optional[str] = None,
+    judge_model: str = "microsoft/deberta-base-mnli",
+    **kwargs
+) -> float:
+    """
+    BERT-based entailment function using MNLI.
+    Checks bidirectional entailment: (output1 -> output2) AND (output2 -> output1)
+    Returns 1.0 if mutually entailed, 0.0 otherwise.
+    """
+    try:
+        nli = get_bert_nli_model(judge_model)
+        inputs = nli.detection_tokenizer(
+            output1, output2, return_tensors="pt", padding=True
+        ).to("cuda")
+        outputs = nli.detection_model(**inputs)
+        scores = outputs.logits.softmax(dim=-1)
+        return scores.T[2].item()
+    except Exception as e:
+        print(f"Error during BERT entailment judging: {e}")
+        return 0.0
+
+
+def entailment_openai(
     output1: str,
     output2: str,
     question: Optional[str] = None,
@@ -18,17 +89,6 @@ def entailment(
     
     Uses an LLM to judge if two outputs mutually entail each other.
     Returns 1.0 if they mutually entail, 0.0 otherwise.
-    
-    Args:
-        output1: First output text (sentence A)
-        output2: Second output text (sentence B)
-        question: Ignored (not used by entailment judge)
-        judge_model: Model to use for judging (default: "gpt-4o-mini")
-        prompt_template_path: Optional path to prompt template. If None, uses default.
-        **kwargs: Additional context (e.g., prompt_template to override default)
-        
-    Returns:
-        1.0 if mutually entailed, 0.0 otherwise
     """
     try:
         from openai import OpenAI
@@ -63,5 +123,6 @@ def entailment(
         judgment = (response.choices[0].message.content or "").strip().lower()
         return 1.0 if judgment.startswith("yes") else 0.0
     except Exception as e:
-        print(f"Error during entailment judging: {e}")
+        print(f"Error during OpenAI entailment judging: {e}")
         return 0.0
+
