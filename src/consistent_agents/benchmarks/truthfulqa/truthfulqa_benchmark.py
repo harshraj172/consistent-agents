@@ -51,7 +51,7 @@ class TruthfulQABenchmark(BaseBenchmark):
         }
 
         self.consistency_configs = [
-            ("consistency", "pairwise"),
+            ("llm_as_judge", "pairwise"),
             ("contradiction", "pairwise"),
             ("entailment", "pairwise"),
         ]
@@ -121,8 +121,9 @@ class TruthfulQABenchmark(BaseBenchmark):
                 score, total_pairs = proportion
             else:
                 score, total_pairs = proportion, 1
-            key = f"{agreement}_{aggregator}"
-            consistency_results[key] = {"score": score, "total_pairs": total_pairs}
+            if agreement not in consistency_results:
+                consistency_results[agreement] = {}
+            consistency_results[agreement][aggregator] = {"score": score, "total_pairs": total_pairs}
         
         accuracy_count, accuracy_pairs = accuracy_score(
             question=question,
@@ -145,14 +146,14 @@ class TruthfulQABenchmark(BaseBenchmark):
 
         accuracy = self.item_scores["accuracy"]["accuracy_count"] / self.item_scores["accuracy"]["accuracy_pairs"]
         consistency = []
-        for key, result in self.item_scores["consistency"].items():
-            agreement, aggregator = key.split("_", 1)  # Split "consistency_pairwise" into ("consistency", "pairwise")
-            score = result["score"] / result["total_pairs"]
-            consistency.append({
-                "aggregator": aggregator,
-                "agreement_function": agreement,
-                "score": score
-            })
+        for agreement, aggregators in self.item_scores["consistency"].items():
+            for aggregator, result in aggregators.items():
+                score = result["score"] / result["total_pairs"]
+                consistency.append({
+                    "aggregator": aggregator,
+                    "agreement_function": agreement,
+                    "score": score
+                })
         return {
             "accuracy": accuracy,
             "consistency": consistency
@@ -162,14 +163,14 @@ class TruthfulQABenchmark(BaseBenchmark):
         """Get the total scores for the benchmark."""
         accuracy = self.total_scores["accuracy"]["accuracy_count"] / self.total_scores["accuracy"]["accuracy_pairs"]
         consistency = []
-        for key, result in self.total_scores["consistency"].items():
-            agreement, aggregator = key.split("_", 1)  # Split "consistency_pairwise" into ("consistency", "pairwise")
-            score = result["score"] / result["total_pairs"]
-            consistency.append({
-                "aggregator": aggregator,
-                "agreement_function": agreement,
-                "score": score
-            })
+        for agreement, aggregators in self.total_scores["consistency"].items():
+            for aggregator, result in aggregators.items():
+                score = result["score"] / result["total_pairs"]
+                consistency.append({
+                    "aggregator": aggregator,
+                    "agreement_function": agreement,
+                    "score": score
+                })
         return {
             "accuracy": accuracy,
             "consistency": consistency,
@@ -186,9 +187,14 @@ class TruthfulQABenchmark(BaseBenchmark):
         if self.total_scores["consistency"] is None:
             self.total_scores["consistency"] = self.item_scores["consistency"]
         else:
-            for key, result in self.item_scores["consistency"].items():
-                self.total_scores["consistency"][key]["score"] += result["score"]
-                self.total_scores["consistency"][key]["total_pairs"] += result["total_pairs"]
+            for agreement, aggregators in self.item_scores["consistency"].items():
+                if agreement not in self.total_scores["consistency"]:
+                    self.total_scores["consistency"][agreement] = {}
+                for aggregator, result in aggregators.items():
+                    if aggregator not in self.total_scores["consistency"][agreement]:
+                        self.total_scores["consistency"][agreement][aggregator] = {"score": 0, "total_pairs": 0}
+                    self.total_scores["consistency"][agreement][aggregator]["score"] += result["score"]
+                    self.total_scores["consistency"][agreement][aggregator]["total_pairs"] += result["total_pairs"]
         
         self.total_scores["total"] += self.item_scores["total"]
     def __len__(self) -> int:
