@@ -187,12 +187,18 @@ class SWEBenchBenchmark(BaseBenchmark):
 
     def item_score(self) -> Dict[str, float]:
         """Get the scores for a specific item."""
-        return {"accuracy": self.item_scores["correct_count"] / self.item_scores["total"]}
+        accuracy = self.item_scores["correct_count"] / self.item_scores["total"]
+        return {
+            "accuracy": accuracy,
+            "consistency": accuracy,  
+        }
     
     def total_score(self) -> Dict[str, float]:
         """Get the total scores for the benchmark."""
+        accuracy = self.total_scores["correct_count"] / self.total_scores["total"]
         return {
-            "accuracy": self.total_scores["correct_count"] / self.total_scores["total"],
+            "accuracy": accuracy,
+            "consistency": accuracy, 
             "total": self.total_scores["total"],
         }
 
