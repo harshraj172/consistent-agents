@@ -125,7 +125,7 @@ class TruthfulQABenchmark(BaseBenchmark):
                 consistency_results[agreement] = {}
             consistency_results[agreement][aggregator] = {"score": score, "total_pairs": total_pairs}
         
-        accuracy_count, accuracy_pairs = accuracy_score(
+        accuracy_count = accuracy_score(
             question=question,
             predictions=predictions,
             correct_answers=correct_answers,
@@ -134,7 +134,7 @@ class TruthfulQABenchmark(BaseBenchmark):
         )
         
         self.item_scores = {
-            "accuracy": {"accuracy_count": accuracy_count, "accuracy_pairs": accuracy_pairs},
+            "accuracy": {"accuracy_count": accuracy_count, "accuracy_total": total_predictions},
             "consistency":consistency_results,
             "total": total_predictions,
         }
@@ -144,7 +144,7 @@ class TruthfulQABenchmark(BaseBenchmark):
     def item_score(self) -> Dict[str, Any]:
         """Get the scores for a specific item."""
 
-        accuracy = self.item_scores["accuracy"]["accuracy_count"] / self.item_scores["accuracy"]["accuracy_pairs"]
+        accuracy = self.item_scores["accuracy"]["accuracy_count"] / self.item_scores["accuracy"]["accuracy_total"]
         consistency = []
         for agreement, aggregators in self.item_scores["consistency"].items():
             for aggregator, result in aggregators.items():
@@ -161,7 +161,7 @@ class TruthfulQABenchmark(BaseBenchmark):
     
     def total_score(self) -> Dict[str, Any]:
         """Get the total scores for the benchmark."""
-        accuracy = self.total_scores["accuracy"]["accuracy_count"] / self.total_scores["accuracy"]["accuracy_pairs"]
+        accuracy = self.total_scores["accuracy"]["accuracy_count"] / self.total_scores["accuracy"]["accuracy_total"]
         consistency = []
         for agreement, aggregators in self.total_scores["consistency"].items():
             for aggregator, result in aggregators.items():
@@ -181,7 +181,7 @@ class TruthfulQABenchmark(BaseBenchmark):
         if self.total_scores["accuracy"] is None:
             self.total_scores["accuracy"] = self.item_scores["accuracy"]
         else:
-            self.total_scores["accuracy"]["accuracy_pairs"] += self.item_scores["accuracy"]["accuracy_pairs"]
+            self.total_scores["accuracy"]["accuracy_total"] += self.item_scores["accuracy"]["accuracy_total"]
             self.total_scores["accuracy"]["accuracy_count"] += self.item_scores["accuracy"]["accuracy_count"]
         
         if self.total_scores["consistency"] is None:
