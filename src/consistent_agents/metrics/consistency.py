@@ -5,7 +5,7 @@ from consistent_agents.metrics.aggregators.entropy import entropy
 
 # Mapping from string names to agreement functions
 AGREEMENT_FUNCTIONS = {
-    "llm-as-judge": llm_as_judge,
+    "llm_as_judge": llm_as_judge,
     "contradiction": contradiction,
     "entailment": entailment,
     "bertscore": bertscore,
@@ -22,7 +22,7 @@ AGGREGATORS = {
 def score(
     outputs: List[str],
     question: Optional[str] = None,
-    agreement: str = "llm-as-judge",
+    agreement: str = "llm_as_judge",
     agreement_params: Optional[Dict[str, Any]] = None,
     aggregator: str = "pairwise",
     aggregator_params: Optional[Dict[str, Any]] = None,
