@@ -43,8 +43,7 @@ def score(
         if is_correct:
             correct_count += 1
     
-    total_predictions = len(predictions)
-    return correct_count, total_predictions
+    return correct_count
 
 
 def _judge_accuracy(question: str, prediction: str, correct_answers: List[str], incorrect_answers: List[str], prompt_template: str, judge_model: str = "gpt-4o-mini") -> bool:
