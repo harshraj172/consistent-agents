@@ -3,10 +3,10 @@ from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 
-__all__ = ["consistency"]
+__all__ = ["llm_as_judge"]
 
 
-def consistency(
+def llm_as_judge(
     output1: str,
     output2: str,
     question: Optional[str] = None,
