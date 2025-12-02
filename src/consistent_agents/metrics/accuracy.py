@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
@@ -10,6 +10,8 @@ def score(
     correct_answers: List[str],
     incorrect_answers: List[str],
     judge_model: str = "gpt-4o-mini",
+    prompt_template_path: Optional[Path] = None,
+
 ) -> float:
     """Calculate accuracy score for predictions using LLM-as-judge.
     
@@ -23,9 +25,10 @@ def score(
     Returns:
         Accuracy score between 0.0 and 1.0 (fraction of correct predictions)
     """
-    prompt_template = Path(REPO_ROOT / "src" / "consistent_agents" / "benchmarks" / "truthfulqa" / 
-                          "prompt-templates" / "truthfulqa-accuracy-judge.txt").read_text()
-    
+    if prompt_template_path is None:
+        prompt_template = Path(REPO_ROOT / "src" / "consistent_agents" / "benchmarks" / "truthfulqa" / 
+                            "prompt-templates" / "truthfulqa-accuracy-judge.txt").read_text()
+        
     correct_count = 0
     for prediction in predictions:
         is_correct = _judge_accuracy(
