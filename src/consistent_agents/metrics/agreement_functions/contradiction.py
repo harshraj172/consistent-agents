@@ -6,7 +6,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 
 __all__ = ["contradiction", "contradiction_bert", "contradiction_openai"]
 
-from consistent_agents.models.bertnli import get_huggingface_model
+from consistent_agents.models.hfmodel import get_huggingface_model
 
 
 def contradiction(
@@ -66,11 +66,11 @@ def contradiction_bert(
     """
     try:    
         nli = get_huggingface_model(judge_model, model_type="sequence_classification")
-        inputs = nli.detection_tokenizer(
+        inputs = nli.tokenizer(
             output1, output2, return_tensors="pt", padding=True
-        ).to("cuda")
+        ).to(nli.device)
         with torch.no_grad():
-            outputs = nli.detection_model(**inputs)
+            outputs = nli.model(**inputs)
         scores = outputs.logits.softmax(dim=-1)
         return scores.T[0].item()
     except Exception as e:
@@ -92,9 +92,9 @@ def contradiction_openai(
     Returns 0.0 if they contradict, 1.0 otherwise.
     """
     try:
-        from openai import OpenAI
+        import litellm
     except ImportError:
-        raise ImportError("OpenAI package not installed. Install with: pip install openai")
+        raise ImportError("litellm package not installed. Install with: pip install litellm")
     
     if prompt_template_path is None:
         raise ValueError(
@@ -104,11 +104,9 @@ def contradiction_openai(
     
     prompt_template = prompt_template_path.read_text()
     
-    client = OpenAI()
-    
     try:
         prompt = prompt_template.format(sentence_a=output1, sentence_b=output2)
-        response = client.chat.completions.create(
+        response = litellm.completion(
             model=judge_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
@@ -117,5 +115,5 @@ def contradiction_openai(
         judgment = (response.choices[0].message.content or "").strip().lower()
         return 0.0 if judgment.startswith("yes") else 1.0
     except Exception as e:
-        print(f"Error during OpenAI contradiction judging: {e}")
+        print(f"Error during litellm contradiction judging: {e}")
         return 0.0

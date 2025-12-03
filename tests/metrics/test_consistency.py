@@ -15,8 +15,8 @@ class TestConsistencyMetric:
     """Tests for Consistency metric function."""
     
     @patch('consistent_agents.metrics.aggregators.pairwise.pairwise')
-    @patch('consistent_agents.metrics.agreement_functions.consistency.consistency')
-    def test_score_with_mocked_components(self, mock_consistency_fn, mock_pairwise_fn):
+    @patch('consistent_agents.metrics.agreement_functions.llm_as_judge.llm_as_judge')
+    def test_score_with_mocked_components(self, mock_llm_as_judge_fn, mock_pairwise_fn):
         """Test that score correctly uses agreement function and aggregator."""
         # Replace in dictionary
         original_pairwise = consistency_module.AGGREGATORS['pairwise']
@@ -24,7 +24,7 @@ class TestConsistencyMetric:
         
         try:
             # Mock the agreement function to return 0.8
-            mock_consistency_fn.return_value = 0.8
+            mock_llm_as_judge_fn.return_value = 0.8
             
             # Mock the aggregator to return (2.4, 3) - total agreement and pairs
             mock_pairwise_fn.return_value = (2.4, 3)
@@ -118,15 +118,15 @@ class TestConsistencyMetric:
             consistency_score(outputs, aggregator="invalid_aggregator")
     
     @patch('consistent_agents.metrics.aggregators.pairwise.pairwise')
-    @patch('consistent_agents.metrics.agreement_functions.consistency.consistency')
-    def test_score_passes_agreement_params(self, mock_consistency_fn, mock_pairwise_fn):
+    @patch('consistent_agents.metrics.agreement_functions.llm_as_judge.llm_as_judge')
+    def test_score_passes_agreement_params(self, mock_llm_as_judge_fn, mock_pairwise_fn):
         """Test that score passes agreement_params correctly."""
         # Replace in dictionary
         original_pairwise = consistency_module.AGGREGATORS['pairwise']
         consistency_module.AGGREGATORS['pairwise'] = mock_pairwise_fn
         
         try:
-            mock_consistency_fn.return_value = 0.8
+            mock_llm_as_judge_fn.return_value = 0.8
             mock_pairwise_fn.return_value = (2.4, 3)
             
             outputs = ["Output 1", "Output 2", "Output 3"]
@@ -135,7 +135,7 @@ class TestConsistencyMetric:
             consistency_score(
                 outputs,
                 question="Test question",
-                agreement="consistency",
+                agreement="llm_as_judge",
                 agreement_params=agreement_params
             )
             

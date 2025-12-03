@@ -1,6 +1,7 @@
 import random
 from pathlib import Path
 from consistent_agents.perturbations.base import BasePerturbation
+from consistent_agents.models.litellm import LitellmModel
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
@@ -15,8 +16,7 @@ class LLMBackTranslationPerturbation(BasePerturbation):
         **kwargs,
     ):
         super().__init__(**kwargs)
-        from openai import OpenAI
-
+        
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -25,7 +25,11 @@ class LLMBackTranslationPerturbation(BasePerturbation):
             random.seed(self.seed)
 
         self.languages = languages or ["French", "Spanish", "German", "Hindi", "Japanese", "Arabic"]
-        self.client = OpenAI()
+        
+        self.litellm_model = LitellmModel(
+            model_name=model,
+            model_kwargs={"seed": seed} if seed is not None else {}
+        )
 
         tmpl_dir = (
             REPO_ROOT
@@ -38,14 +42,12 @@ class LLMBackTranslationPerturbation(BasePerturbation):
         self.lang_to_en_tmpl = (tmpl_dir / "translate-lang-to-en.txt").read_text(encoding="utf-8")
 
     def _chat(self, prompt: str) -> str:
-        resp = self.client.chat.completions.create(
-            model=self.model,
+        response = self.litellm_model.query(
             messages=[{"role": "user", "content": prompt}],
             temperature=self.temperature,
             max_tokens=self.max_tokens,
-            seed=self.seed,
         )
-        return (resp.choices[0].message.content or "").strip()
+        return response["content"].strip()
 
     def apply(self, text: str, **kwargs) -> str:
         if not text:
