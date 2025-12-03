@@ -26,8 +26,12 @@ def score(
         Accuracy score between 0.0 and 1.0 (fraction of correct predictions)
     """
     if prompt_template_path is None:
-        prompt_template = Path(REPO_ROOT / "src" / "consistent_agents" / "benchmarks" / "truthfulqa" / 
-                            "prompt-templates" / "truthfulqa-accuracy-judge.txt").read_text()
+        raise ValueError(
+            "prompt_template_path must be provided. "
+            "Each benchmark may require a different prompt template for the judge."
+        )
+    
+    prompt_template = prompt_template_path.read_text()
         
     correct_count = 0
     for prediction in predictions:
