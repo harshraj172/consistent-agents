@@ -40,9 +40,7 @@ class TruthfulQABenchmark(BaseBenchmark):
         if task not in ["generation"]:
             raise ValueError(f"Task must be 'generation', got {task}")
         
-        from openai import OpenAI
         self.judge_model = judge_model
-        self.client = OpenAI()
 
         self.item_scores: Dict[str, Any] = {}
 

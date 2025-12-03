@@ -31,10 +31,10 @@ def llm_as_judge(
         1.0 if consistent, 0.0 if not consistent
     """
     try:
-        from openai import OpenAI
+        import litellm
     except ImportError:
         raise ImportError(
-            "OpenAI package not installed. Install with: pip install openai"
+            "litellm package not installed. Install with: pip install litellm"
         )
     
     if prompt_template_path is None:
@@ -48,8 +48,6 @@ def llm_as_judge(
     if question is None:
         question = ""  # Some prompts might work without question
     
-    client = OpenAI()
-    
     try:
         prompt = prompt_template.format(
             question=question,
@@ -57,7 +55,7 @@ def llm_as_judge(
             prediction2=output2
         )
         
-        response = client.chat.completions.create(
+        response = litellm.completion(
             model=judge_model,
             messages=[
                 {
@@ -69,7 +67,7 @@ def llm_as_judge(
             max_tokens=10
         )
         
-        judgment = response.choices[0].message.content.strip()
+        judgment = (response.choices[0].message.content or "").strip()
         return 1.0 if judgment.lower().startswith('yes') else 0.0
         
     except Exception as e:

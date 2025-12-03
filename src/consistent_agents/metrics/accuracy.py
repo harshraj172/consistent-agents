@@ -65,13 +65,11 @@ def _judge_accuracy(question: str, prediction: str, correct_answers: List[str], 
         True if prediction is judged as accurate, False otherwise
     """
     try:
-        from openai import OpenAI
+        import litellm
     except ImportError:
         raise ImportError(
-            "OpenAI package not installed. Install with: pip install openai"
+            "litellm package not installed. Install with: pip install litellm"
         )
-    
-    client = OpenAI()
     
     try:
         prompt = prompt_template.format(
@@ -81,7 +79,7 @@ def _judge_accuracy(question: str, prediction: str, correct_answers: List[str], 
             incorrect_answers=','.join(incorrect_answers)
         )
         
-        response = client.chat.completions.create(
+        response = litellm.completion(
             model=judge_model,
             messages=[
                 {
@@ -93,7 +91,7 @@ def _judge_accuracy(question: str, prediction: str, correct_answers: List[str], 
             max_tokens=10
         )
         
-        judgment = response.choices[0].message.content.strip()
+        judgment = (response.choices[0].message.content or "").strip()
         return judgment.lower().startswith('yes')
         
     except Exception as e:

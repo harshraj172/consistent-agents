@@ -29,16 +29,17 @@ class TestAccuracyMetric:
         correct_answers = ["4", "four"]
         incorrect_answers = ["5", "five"]
         
-        correct_count, total_predictions = accuracy_score(
+        correct_count = accuracy_score(
             question=question,
             predictions=predictions,
             correct_answers=correct_answers,
-            incorrect_answers=incorrect_answers
+            incorrect_answers=incorrect_answers,
+            prompt_template_path=mock_template_file
         )
         
         # Should be 2 correct out of 3
         assert correct_count == 2
-        assert total_predictions == 3
+        assert len(predictions) == 3
         assert mock_judge.call_count == 3
     
     @patch('consistent_agents.metrics.accuracy._judge_accuracy')
@@ -57,15 +58,16 @@ class TestAccuracyMetric:
         correct_answers = ["4"]
         incorrect_answers = ["5"]
         
-        correct_count, total_predictions = accuracy_score(
+        correct_count = accuracy_score(
             question=question,
             predictions=predictions,
             correct_answers=correct_answers,
-            incorrect_answers=incorrect_answers
+            incorrect_answers=incorrect_answers,
+            prompt_template_path=mock_template_file
         )
         
         assert correct_count == 3
-        assert total_predictions == 3
+        assert len(predictions) == 3
     
     @patch('consistent_agents.metrics.accuracy._judge_accuracy')
     @patch('consistent_agents.metrics.accuracy.Path')
@@ -83,26 +85,25 @@ class TestAccuracyMetric:
         correct_answers = ["4"]
         incorrect_answers = ["5"]
         
-        correct_count, total_predictions = accuracy_score(
+        correct_count = accuracy_score(
             question=question,
             predictions=predictions,
             correct_answers=correct_answers,
-            incorrect_answers=incorrect_answers
+            incorrect_answers=incorrect_answers,
+            prompt_template_path=mock_template_file
         )
         
         assert correct_count == 0
-        assert total_predictions == 3
+        assert len(predictions) == 3
     
-    @patch('openai.OpenAI')
-    def test_judge_accuracy_with_openai_mock(self, mock_openai):
-        """Test _judge_accuracy function with OpenAI mocking."""
-        # Mock OpenAI client
-        mock_client = MagicMock()
+    @patch('litellm.completion')
+    def test_judge_accuracy_with_openai_mock(self, mock_litellm):
+        """Test _judge_accuracy function with litellm mocking."""
+        # Mock litellm completion
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Yes"
-        mock_client.chat.completions.create.return_value = mock_response
-        mock_openai.return_value = mock_client
+        mock_litellm.return_value = mock_response
         
         result = _judge_accuracy(
             question="What is 2+2?",
@@ -114,18 +115,16 @@ class TestAccuracyMetric:
         )
         
         assert result is True
-        mock_client.chat.completions.create.assert_called_once()
+        mock_litellm.assert_called_once()
     
-    @patch('openai.OpenAI')
-    def test_judge_accuracy_returns_false_for_no(self, mock_openai):
+    @patch('litellm.completion')
+    def test_judge_accuracy_returns_false_for_no(self, mock_litellm):
         """Test _judge_accuracy returns False when LLM says No."""
-        # Mock OpenAI client
-        mock_client = MagicMock()
+        # Mock litellm completion
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "No"
-        mock_client.chat.completions.create.return_value = mock_response
-        mock_openai.return_value = mock_client
+        mock_litellm.return_value = mock_response
         
         result = _judge_accuracy(
             question="What is 2+2?",
@@ -138,13 +137,11 @@ class TestAccuracyMetric:
         
         assert result is False
     
-    @patch('openai.OpenAI')
-    def test_judge_accuracy_handles_exceptions(self, mock_openai):
+    @patch('litellm.completion')
+    def test_judge_accuracy_handles_exceptions(self, mock_litellm):
         """Test _judge_accuracy handles exceptions gracefully."""
-        # Mock OpenAI client to raise exception
-        mock_client = MagicMock()
-        mock_client.chat.completions.create.side_effect = Exception("API Error")
-        mock_openai.return_value = mock_client
+        # Mock litellm completion to raise exception
+        mock_litellm.side_effect = Exception("API Error")
         
         result = _judge_accuracy(
             question="What is 2+2?",

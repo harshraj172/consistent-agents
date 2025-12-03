@@ -6,7 +6,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 
 __all__ = ["entailment", "entailment_bert", "entailment_openai"]
 
-from consistent_agents.models.bertnli import get_huggingface_model
+from consistent_agents.models.hfmodel import get_huggingface_model
 
 
 def entailment(
@@ -66,10 +66,11 @@ def entailment_bert(
     """
     try:
         nli = get_huggingface_model(judge_model, model_type="sequence_classification")
-        inputs = nli.detection_tokenizer(
+        inputs = nli.tokenizer(
             output1, output2, return_tensors="pt", padding=True
-        ).to("cuda")
-        outputs = nli.detection_model(**inputs)
+        ).to(nli.device)
+        with torch.no_grad():
+            outputs = nli.model(**inputs)
         scores = outputs.logits.softmax(dim=-1)
         return scores.T[2].item()
     except Exception as e:
