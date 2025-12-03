@@ -7,6 +7,8 @@ from consistent_agents.environments import DockerEnvironment
 from consistent_agents.metrics.accuracy import score as accuracy_score
 from consistent_agents.metrics.consistency import score as consistency_score
 
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
+
 
 class TruthfulQABenchmark(BaseBenchmark):
     """
@@ -51,9 +53,33 @@ class TruthfulQABenchmark(BaseBenchmark):
         }
 
         self.consistency_configs = [
-            ("llm_as_judge", "pairwise"),
-            ("contradiction", "pairwise"),
-            ("entailment", "pairwise"),
+            (
+                "llm_as_judge",
+                {
+                    "judge_model": self.judge_model,
+                    "prompt_template_path": self.template_dir / "truthfulqa-consistency-judge.txt"
+                },
+                "pairwise",
+                None
+            ),
+            (
+                "contradiction",
+                {
+                    "judge_model": self.judge_model,
+                    "prompt_template_path": self.template_dir / "truthfulqa-contradiction-judge.txt"
+                },
+                "pairwise",
+                None
+            ),
+            (
+                "entailment",
+                {
+                    "judge_model": self.judge_model,
+                    "prompt_template_path": self.template_dir / "truthfulqa-entailment-judge.txt"
+                },
+                "entropy",
+                None
+            ),
         ]
 
     def load(self) -> None:
@@ -108,14 +134,14 @@ class TruthfulQABenchmark(BaseBenchmark):
         total_predictions = len(predictions)
         
         consistency_results = {}
-        for agreement, aggregator in self.consistency_configs:
-            params = {"judge_model": self.judge_model} if agreement in ["consistency", "contradiction", "entailment"] else {}
+        for agreement, agreement_params, aggregator, aggregator_params in self.consistency_configs:
             proportion = consistency_score(
                 outputs=predictions,
                 question=question,
                 agreement=agreement,
-                agreement_params=params,
-                aggregator=aggregator
+                agreement_params=agreement_params,
+                aggregator=aggregator,
+                aggregator_params=aggregator_params
             )
             if aggregator == "pairwise":
                 score, total_pairs = proportion
@@ -130,7 +156,8 @@ class TruthfulQABenchmark(BaseBenchmark):
             predictions=predictions,
             correct_answers=correct_answers,
             incorrect_answers=incorrect_answers,
-            judge_model=self.judge_model
+            judge_model=self.judge_model,
+            prompt_template_path=self.template_dir / "truthfulqa-accuracy-judge.txt"
         )
         
         self.item_scores = {

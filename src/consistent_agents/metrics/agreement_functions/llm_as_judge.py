@@ -38,14 +38,12 @@ def llm_as_judge(
         )
     
     if prompt_template_path is None:
-        prompt_template_path = (
-            REPO_ROOT / "src" / "consistent_agents" / "benchmarks" / "truthfulqa" / 
-            "prompt-templates" / "truthfulqa-consistency-judge.txt"
+        raise ValueError(
+            "prompt_template_path must be provided. "
+            "Each benchmark may require a different prompt template for the judge."
         )
     
-    prompt_template = kwargs.get("prompt_template")
-    if prompt_template is None:
-        prompt_template = prompt_template_path.read_text()
+    prompt_template = prompt_template_path.read_text()
     
     if question is None:
         question = ""  # Some prompts might work without question

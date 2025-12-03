@@ -26,10 +26,8 @@ class ExampleResult:
     base_output: str
     base_prompt: str
     perturbed_outputs: List[Dict[str, Any]]
-    consistency: Optional[float] = None
+    consistency: Optional[List[Dict[str, Any]]] = None
     accuracy: Optional[float] = None
-    entailment: Optional[float] = None
-    contradiction: Optional[float] = None
 
 
 
@@ -58,7 +56,5 @@ class EvalResult:
     examples: List[ExampleResult]
     trajectories: List[AgentTrajectory] = field(default_factory=list)
     total: Optional[int] = None
-    consistency: Optional[float] = None
+    consistency: Optional[List[Dict[str, Any]]] = None
     accuracy: Optional[float] = None
-    entailment: Optional[float] = None
-    contradiction: Optional[float] = None

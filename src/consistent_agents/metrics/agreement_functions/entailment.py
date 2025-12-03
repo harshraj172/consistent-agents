@@ -6,7 +6,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 
 __all__ = ["entailment", "entailment_bert", "entailment_openai"]
 
-from consistent_agents.models.bertnli import get_bert_nli_model
+from consistent_agents.models.bertnli import get_huggingface_model
 
 
 def entailment(
@@ -65,7 +65,7 @@ def entailment_bert(
     Returns 1.0 if mutually entailed, 0.0 otherwise.
     """
     try:
-        nli = get_bert_nli_model(judge_model)
+        nli = get_huggingface_model(judge_model, model_type="sequence_classification")
         inputs = nli.detection_tokenizer(
             output1, output2, return_tensors="pt", padding=True
         ).to("cuda")
@@ -91,30 +91,21 @@ def entailment_openai(
     Returns 1.0 if they mutually entail, 0.0 otherwise.
     """
     try:
-        from openai import OpenAI
+        import litellm
     except ImportError:
-        raise ImportError("OpenAI package not installed. Install with: pip install openai")
+        raise ImportError("litellm package not installed. Install with: pip install litellm")
     
     if prompt_template_path is None:
-        prompt_template_path = (
-            REPO_ROOT
-            / "src"
-            / "consistent_agents"
-            / "benchmarks"
-            / "truthfulqa"
-            / "prompt-templates"
-            / "truthfulqa-entailment-judge.txt"
+        raise ValueError(
+            "prompt_template_path must be provided. "
+            "Each benchmark may require a different prompt template for the judge."
         )
     
-    prompt_template = kwargs.get("prompt_template")
-    if prompt_template is None:
-        prompt_template = prompt_template_path.read_text()
-    
-    client = OpenAI()
+    prompt_template = prompt_template_path.read_text()
     
     try:
         prompt = prompt_template.format(sentence_a=output1, sentence_b=output2)
-        response = client.chat.completions.create(
+        response = litellm.completion(
             model=judge_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
@@ -123,6 +114,6 @@ def entailment_openai(
         judgment = (response.choices[0].message.content or "").strip().lower()
         return 1.0 if judgment.startswith("yes") else 0.0
     except Exception as e:
-        print(f"Error during OpenAI entailment judging: {e}")
+        print(f"Error during litellm entailment judging: {e}")
         return 0.0
 
