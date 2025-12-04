@@ -1,10 +1,10 @@
 import random
 from typing import Callable, Iterable
-import injection as inj_dir
 import consistent_agents.perturbations.injection as inj_dir
 # import LLMInjectionPerturbation, INJECTION_FUNCS
 
 def inject_time_limit(text: str, **kwargs) -> str:
+    """Injects a random time limit to the tasks"""
     if not text:
         return text
     
@@ -25,6 +25,7 @@ def inject_time_limit(text: str, **kwargs) -> str:
     return text + f"\nYou have {set_time_limit} minutes to solve this task."
 
 def inject_coding_practices(text: str, **kwargs):
+    """Injects random instructions for maintaining generic coding practices"""
     if not text:
         return text
 

@@ -18,10 +18,13 @@ class LLMNoiseSWEPerturbation(NoisePerturbation):
         pos = random.randint(0, len(lines))
 
         if noise_select == "emotion":
+            # Inserts an irrelevant statement about mood
             insert_noise = f"\nI am feeling very {random.choice(emotions)} today.\n"
         elif noise_select == "fact":
+            # Inserts a random fact within task description
             insert_noise = f"\nToday is {today.strftime("%A, %B %d, %Y")}.\n"
         elif noise_select == "question":
+            # Inserts a sudden question within task description
             insert_noise = "\nHow are you doing today?\n"
         else:
             insert_noise = "\nCarpe Diem!\n"
