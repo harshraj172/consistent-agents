@@ -22,7 +22,7 @@ class DockerEnvironmentConfig:
     Variables are only forwarded if they are set in the host environment.
     In case of conflict with `env`, the `env` variables take precedence.
     """
-    timeout: int = 30
+    timeout: int = 300
     """Timeout for executing commands in the container."""
     executable: str = "docker"
     """Path to the docker/container executable."""
@@ -203,7 +203,8 @@ class DockerEnvironment(BaseEnvironment):
             self.container_id = None
             return False
 
-    def execute(self, command: str, cwd: str = "", timeout: Optional[int] = None, **kwargs) -> Dict[str, Any]:
+    def execute(self, command: str, cwd: str = "", timeout: Optional[int] = None, 
+                env: dict[str: str] = None, **kwargs) -> dict[str, Any]:
         """Execute a command in the Docker container."""
         if not self.is_running or self.container_id is None:
             self.logger.error(f"Cannot execute command: environment {self.name} is not running")
@@ -217,6 +218,7 @@ class DockerEnvironment(BaseEnvironment):
             }
         
         cwd = cwd or self.docker_config.cwd
+        env = env or self.docker_config.env
         
         try:
             cmd = [self.docker_config.executable, "exec", "-w", cwd]
@@ -225,11 +227,10 @@ class DockerEnvironment(BaseEnvironment):
                 if (value := os.getenv(key)) is not None:
                     cmd.extend(["-e", f"{key}={value}"])
             
-            for key, value in self.docker_config.env.items():
+            for key, value in env.items():
                 cmd.extend(["-e", f"{key}={value}"])
             
             cmd.extend([self.container_id, "bash", "-lc", command])
-            
             result = subprocess.run(
                 cmd,
                 text=True,

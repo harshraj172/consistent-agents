@@ -26,6 +26,7 @@ class BaseInstalledAgent(ABC):
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
+        self.model = model
         self.model_name = model.config.model_name
         self.messages = None
 
@@ -45,31 +46,30 @@ class BaseInstalledAgent(ABC):
         """
         pass
 
-    def extract_trajectory(self, env: BaseEnvironment) -> None:
+    def extract_trajectory(self, environment: BaseEnvironment) -> None:
         pass
         
         
-    def setup(self, env: BaseEnvironment) -> None:
-        env.execute(command="mkdir -p /installed-agent")
+    def setup(self, environment: BaseEnvironment) -> None:
+        environment.execute(command="mkdir -p /installed-agent")
 
-        env.upload(
+        environment.upload(
             host_path=self._install_agent_script_path,
             container_path="/installed-agent/install.sh",
         )
 
-        result = env.execute(command="bash /installed-agent/install.sh")
+        result = environment.execute(command="bash /installed-agent/install.sh")
         return result
 
-    def run(self, task: str, env: BaseEnvironment, **kwargs):
-        result = self.setup(env)
+    def run(self, task: str, environment: BaseEnvironment, **kwargs):
+        result = self.setup(environment)
         assert result["success"] == True, "Failed to set up the installed agent."
         for exec_input in self.create_run_agent_commands(task):
-            result = env.execute(
+            result = environment.execute(
                 command=exec_input.command,
                 cwd=exec_input.cwd,
                 env=exec_input.env,
                 timeout_sec=exec_input.timeout_sec,
             )
-            print("result['stdout']:", result['stdout'])
-            print("result['stderr']:", result['stderr'])
             assert result["success"] == True, f"Failed to run the command: {exec_input.command}."
+        self.extract_trajectory(environment)

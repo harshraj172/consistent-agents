@@ -117,10 +117,7 @@ def resolve_agent_callable(cfg: Dict[str, Any]) -> Callable[[str, BaseEnvironmen
                     output_text = str(res)
 
                 messages = deepcopy(instance.messages)
-                try:
-                    agent_config = asdict(instance.config)
-                except TypeError:
-                    agent_config = getattr(instance, "config", {})
+                agent_config = getattr(instance, "config", {})
 
                 metadata = {
                     "agent_name": instance.__class__.__name__,
