@@ -3,8 +3,9 @@ import os
 import shlex
 import subprocess
 import uuid
+from pathlib import Path
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 from consistent_agents.environments.base import BaseEnvironment
 
@@ -12,7 +13,7 @@ from consistent_agents.environments.base import BaseEnvironment
 @dataclass
 class DockerEnvironmentConfig:
     image: str = "python:3.10-slim"
-    cwd: str = "/"
+    cwd: str = "/testbed"
     """Working directory in which to execute commands."""
     env: dict[str, str] = field(default_factory=dict)
     """Environment variables to set in the container."""
@@ -78,9 +79,6 @@ class DockerEnvironment(BaseEnvironment):
             dockerfile_path: Optional Dockerfile path. If provided, builds image from this Dockerfile.
             container_name: Optional container name. If not provided, generates a random name.
         """
-        # if self.is_running:
-        #     self.logger.warning(f"Environment {self.name} is already running")
-        #     return True
 
         if self.is_container_running(container_name):
             self.logger.debug(f"Container {container_name} is already running, stopping it first.")
@@ -308,8 +306,9 @@ class DockerEnvironment(BaseEnvironment):
             self.logger.error(f"Unexpected error creating directory in container: {e}")
         return False
 
-    def upload(self, host_path: str, container_path: str) -> bool:
+    def upload(self, host_path: Union[str, Path], container_path: Union[str, Path]) -> bool:
         """Upload a file or directory (streamed as a tarball) into the container."""
+        host_path, container_path = str(host_path), str(container_path)
         if not self.is_running or self.container_id is None:
             self.logger.error(f"Cannot upload: environment {self.name} is not running")
             return False
@@ -442,6 +441,44 @@ class DockerEnvironment(BaseEnvironment):
                     pass
                 tar_proc.wait()
             return False
+
+    def download(self, container_path: Union[str, Path], host_path: Union[str, Path]) -> bool:
+        """Download a file or directory from the container to the host."""
+        container_path, host_path = str(container_path), str(host_path)
+        if not self.is_running or self.container_id is None:
+            self.logger.error(f"Cannot download: environment {self.name} is not running")
+            return False
+
+        resolved_host_path = os.path.abspath(host_path)
+        target_dir = resolved_host_path if resolved_host_path.endswith(os.sep) else os.path.dirname(resolved_host_path)
+        if target_dir:
+            os.makedirs(target_dir, exist_ok=True)
+
+        cmd = [
+            self.docker_config.executable,
+            "cp",
+            f"{self.container_id}:{container_path}",
+            resolved_host_path,
+        ]
+
+        try:
+            self.logger.debug(f"Downloading from container with command: {shlex.join(cmd)}")
+            subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=self.docker_config.timeout,
+                check=True,
+            )
+            return True
+        except subprocess.CalledProcessError as e:
+            error_output = e.stderr or e.stdout or str(e)
+            self.logger.error(f"Download command failed: {error_output}")
+        except subprocess.TimeoutExpired:
+            self.logger.error(f"Timeout while downloading from container (timeout={self.docker_config.timeout}s)")
+        except Exception as e:
+            self.logger.error(f"Unexpected error during download: {e}")
+        return False
 
     def is_healthy(self) -> bool:
         """
