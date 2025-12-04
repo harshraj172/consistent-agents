@@ -1,11 +1,12 @@
 import os 
 import shlex
+import json
 import tempfile
 from pathlib import Path
 from abc import abstractmethod
 
 from consistent_agents.agents.installed.base import BaseInstalledAgent, ExecInput
-
+    
 
 class Codex(BaseInstalledAgent):
     """
@@ -19,15 +20,14 @@ class Codex(BaseInstalledAgent):
         """
         return Path(__file__).parent / "install-codex.sh.j2"
 
-    def extract_trajectory(self, env):
-        trajectory_path = Path(f"~/.codex/sessions")
-        trajectory_path = list(trajectory_path.glob("**/*.jsonl"))[0]
+    def extract_trajectory(self, environment):
         with tempfile.TemporaryDirectory() as tmpdir:
-            tmp_path = Path(tmpdir) / trajectory_path.name
-            env.download(container_path=trajectory_path,
-                        host_path=tmp_path)
-            with open(tmp_path, "r") as f:
-                self.messages = f.read()
+            tmpdir_path = Path(tmpdir)
+            environment.download(container_path="/root/.codex", host_path=tmpdir_path)
+
+            trajectory_files = list(tmpdir_path.glob("**/*.jsonl"))
+            lines = trajectory_files[0].read_text().strip().split('\n')
+            self.messages = [json.loads(line) for line in lines]
         
     def create_run_agent_commands(self, instruction: str) -> list[ExecInput]:
         escaped_instruction = shlex.quote(instruction)
@@ -44,10 +44,10 @@ class Codex(BaseInstalledAgent):
         return [
             ExecInput(
                 command="""
-mkdir -p "$HOME/.codex"
+mkdir -p "$HOME/.codex" && 
 cat <<EOF >"$HOME/.codex/auth.json"
 {
-  "OPENAI_API_KEY": "${OPENAI_API_KEY}"
+"OPENAI_API_KEY": "$OPENAI_API_KEY"
 }
 EOF
                 """,
@@ -61,8 +61,7 @@ EOF
                     f"--model {model} "
                     "--json "
                     "-- "  # end of flags
-                    f"{escaped_instruction} "
-                    "&& rm -rf $CODEX_HOME/auth.json"
+                    f"{escaped_instruction}"
                 ),
                 env=env,
             ),
