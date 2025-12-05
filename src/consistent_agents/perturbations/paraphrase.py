@@ -2,6 +2,7 @@ import random
 from pathlib import Path
 
 from consistent_agents.perturbations.base import BasePerturbation
+from consistent_agents.models.litellm import LitellmModel
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
@@ -18,19 +19,15 @@ class LLMParaphrasePerturbation(BasePerturbation):
         """Initialize LLM-based paraphrase perturbation."""
         super().__init__(**kwargs)
         
-        try:
-            from openai import OpenAI
-        except ImportError:
-            raise ImportError(
-                "OpenAI package not installed. Install with: pip install openai"
-            )
-        
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.seed = seed
         
-        self.client = OpenAI()
+        self.litellm_model = LitellmModel(
+            model_name=model,
+            model_kwargs={"seed": seed} if seed is not None else {}
+        )
     
     def apply(self, text: str, **kwargs) -> str:
         """Apply LLM-based paraphrasing to the text."""
@@ -44,8 +41,7 @@ class LLMParaphrasePerturbation(BasePerturbation):
         prompt = prompt.replace("{sentence}", text)
         
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
+            response = self.litellm_model.query(
                 messages=[
                     {
                         "role": "user",
@@ -54,10 +50,9 @@ class LLMParaphrasePerturbation(BasePerturbation):
                 ],
                 temperature=temperature,
                 max_tokens=self.max_tokens,
-                seed=self.seed,
             )
             
-            paraphrased = response.choices[0].message.content.strip()
+            paraphrased = response["content"].strip()
             return paraphrased
             
         except Exception as e:

@@ -1,10 +1,13 @@
 from pathlib import Path
-from itertools import combinations
 from typing import Iterator, Dict, Any, List, Optional
 
 import datasets
 from consistent_agents.benchmarks.base import BaseBenchmark
 from consistent_agents.environments import DockerEnvironment
+from consistent_agents.metrics.accuracy import score as accuracy_score
+from consistent_agents.metrics.consistency import score as consistency_score
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 
 
 class TruthfulQABenchmark(BaseBenchmark):
@@ -37,15 +40,46 @@ class TruthfulQABenchmark(BaseBenchmark):
         if task not in ["generation"]:
             raise ValueError(f"Task must be 'generation', got {task}")
         
-        try:
-            from openai import OpenAI
-        except ImportError:
-            raise ImportError(
-                "OpenAI package not installed. Install with: pip install openai"
-            )
         self.judge_model = judge_model
-        self.client = OpenAI()
-        
+
+        self.item_scores: Dict[str, Any] = {}
+
+        self.total_scores = {
+            "accuracy": None,
+            "consistency": None,
+            "total":0
+        }
+
+        self.consistency_configs = [
+            (
+                "llm_as_judge",
+                {
+                    "judge_model": self.judge_model,
+                    "prompt_template_path": self.template_dir / "truthfulqa-consistency-judge.txt"
+                },
+                "pairwise",
+                None
+            ),
+            (
+                "contradiction",
+                {
+                    "judge_model": self.judge_model,
+                    "prompt_template_path": self.template_dir / "truthfulqa-contradiction-judge.txt"
+                },
+                "pairwise",
+                None
+            ),
+            (
+                "entailment",
+                {
+                    "judge_model": self.judge_model,
+                    "prompt_template_path": self.template_dir / "truthfulqa-entailment-judge.txt"
+                },
+                "entropy",
+                None
+            ),
+        ]
+
     def load(self) -> None:
         """
         Load the TruthfulQA dataset from HuggingFace datasets.
@@ -57,20 +91,17 @@ class TruthfulQABenchmark(BaseBenchmark):
                 split=self.split, 
                 cache_dir=self.data_dir
             )
-            print(f"Loaded TruthfulQA ({self.task}) {self.split} split with {len(self.dataset)} examples")
         except Exception as e:
             raise RuntimeError(f"Failed to load TruthfulQA dataset: {e}")
     
     def format_prompt(self, question: str) -> str:
         """Format the prompt for generation evaluation."""
-        prompt = f"Question: {question}\nAnswer:"
-        return prompt
+        return f"Question: {question}\nAnswer:"
     
     def _prepare_instance(self, idx: int, example: Dict[str, Any]) -> Dict[str, Any]:
         """Prepare environment for a TruthfulQA example."""
         if idx in self._prepared:
             return self._prepared[idx]
-
         env = DockerEnvironment()
         env.start()
         state = {"env": env}
@@ -91,86 +122,106 @@ class TruthfulQABenchmark(BaseBenchmark):
                 "env": state["env"],
             }
     
-    def score(self, idx: int, base_output: str, predictions: List[Any]) -> Dict[str, float]:
+    def score(self, idx: int, base_output: str, predictions: List[str]) -> Dict[str, float]:
         """Calculate scores for TruthfulQA predictions."""
-        return {
-            "consistent_count": self._score_consistency(idx, predictions),
-            "correct_count": self._score_accuracy(idx, predictions),
-            "total":  len(predictions) * (len(predictions) - 1) // 2
-        }
-
-    def _score_accuracy(self, idx: int, predictions: List[str]) -> int:
-        """Score generation predictions using LLM-as-judge"""
-        
-        # Load prompt template
-        prompt_template = Path(self.template_dir / "truthfulqa-accuracy-judge.txt").read_text()
-        correct_count = 0
-        
         row = self.dataset[idx]
         question = row["question"]
         correct_answers = row.get("correct_answers", [])
         incorrect_answers = row.get("incorrect_answers", [])
-        for prediction in predictions:
-            prompt = prompt_template.format(
+        
+        total_predictions = len(predictions)
+        
+        consistency_results = {}
+        for agreement, agreement_params, aggregator, aggregator_params in self.consistency_configs:
+            proportion = consistency_score(
+                outputs=predictions,
                 question=question,
-                prediction=prediction,
-                correct_answers=','.join(correct_answers),
-                incorrect_answers=','.join(incorrect_answers)
+                agreement=agreement,
+                agreement_params=agreement_params,
+                aggregator=aggregator,
+                aggregator_params=aggregator_params
             )
-            is_correct = self._judge_answers(
-                prompt=prompt,
-            )
-            if is_correct:
-                correct_count += 1
+            if aggregator == "pairwise":
+                score, total_pairs = proportion
+            else:
+                score, total_pairs = proportion, 1
+            if agreement not in consistency_results:
+                consistency_results[agreement] = {}
+            consistency_results[agreement][aggregator] = {"score": score, "total_pairs": total_pairs}
+        
+        accuracy_count = accuracy_score(
+            question=question,
+            predictions=predictions,
+            correct_answers=correct_answers,
+            incorrect_answers=incorrect_answers,
+            judge_model=self.judge_model,
+            prompt_template_path=self.template_dir / "truthfulqa-accuracy-judge.txt"
+        )
+        
+        self.item_scores = {
+            "accuracy": {"accuracy_count": accuracy_count, "accuracy_total": total_predictions},
+            "consistency":consistency_results,
+            "total": total_predictions,
+        }
+        self._update_totals()
+
     
-        return correct_count
-        
-    def _score_consistency(self, 
-            idx: int, 
-            predictions: List[Dict[str, List[str]]]) -> Dict[str, float]:
-        """Score generation predictions using LLM-as-judge."""
-        
-        prompt_template = Path(self.template_dir / "truthfulqa-consistency-judge.txt").read_text()
-        consistent_count = 0
-        
-        row = self.dataset[idx]
-        pairs = list(combinations(predictions, 2))
-        for (prediction1, prediction2) in pairs:
-            prompt = prompt_template.format(
-                question=row["question"],
-                prediction1=prediction1,
-                prediction2=prediction2
-            )
-            is_same = self._judge_answers(
-                prompt=prompt
-            )
-            if is_same:
-                consistent_count += 1
-        
-        return consistent_count
+    def item_score(self) -> Dict[str, Any]:
+        """Get the scores for a specific item."""
+
+        accuracy = self.item_scores["accuracy"]["accuracy_count"] / self.item_scores["accuracy"]["accuracy_total"]
+        consistency = []
+        for agreement, aggregators in self.item_scores["consistency"].items():
+            for aggregator, result in aggregators.items():
+                score = result["score"] / result["total_pairs"]
+                consistency.append({
+                    "aggregator": aggregator,
+                    "agreement_function": agreement,
+                    "score": score
+                })
+        return {
+            "accuracy": accuracy,
+            "consistency": consistency
+        }
     
-    def _judge_answers(self, prompt: str) -> bool:
-        """Use LLM to judge if prediction matches the reference answer"""
-        try:
-            response = self.client.chat.completions.create(
-                model=self.judge_model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                temperature=0.1,
-                max_tokens=10
-            )
-            
-            judgment = response.choices[0].message.content.strip()
-            return judgment.lower().startswith('yes')
-            
-        except Exception as e:
-            print(f"Error during LLM judging: {e}")
-            return False
+    def total_score(self) -> Dict[str, Any]:
+        """Get the total scores for the benchmark."""
+        accuracy = self.total_scores["accuracy"]["accuracy_count"] / self.total_scores["accuracy"]["accuracy_total"]
+        consistency = []
+        for agreement, aggregators in self.total_scores["consistency"].items():
+            for aggregator, result in aggregators.items():
+                score = result["score"] / result["total_pairs"]
+                consistency.append({
+                    "aggregator": aggregator,
+                    "agreement_function": agreement,
+                    "score": score
+                })
+        return {
+            "accuracy": accuracy,
+            "consistency": consistency,
+            "total": self.total_scores["total"]
+        }
+
+    def _update_totals(self):
+        if self.total_scores["accuracy"] is None:
+            self.total_scores["accuracy"] = self.item_scores["accuracy"]
+        else:
+            self.total_scores["accuracy"]["accuracy_total"] += self.item_scores["accuracy"]["accuracy_total"]
+            self.total_scores["accuracy"]["accuracy_count"] += self.item_scores["accuracy"]["accuracy_count"]
         
+        if self.total_scores["consistency"] is None:
+            self.total_scores["consistency"] = self.item_scores["consistency"]
+        else:
+            for agreement, aggregators in self.item_scores["consistency"].items():
+                if agreement not in self.total_scores["consistency"]:
+                    self.total_scores["consistency"][agreement] = {}
+                for aggregator, result in aggregators.items():
+                    if aggregator not in self.total_scores["consistency"][agreement]:
+                        self.total_scores["consistency"][agreement][aggregator] = {"score": 0, "total_pairs": 0}
+                    self.total_scores["consistency"][agreement][aggregator]["score"] += result["score"]
+                    self.total_scores["consistency"][agreement][aggregator]["total_pairs"] += result["total_pairs"]
+        
+        self.total_scores["total"] += self.item_scores["total"]
     def __len__(self) -> int:
         """Return the number of examples in the dataset."""
         if self.dataset is None:

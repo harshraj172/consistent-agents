@@ -26,8 +26,9 @@ class ExampleResult:
     base_output: str
     base_prompt: str
     perturbed_outputs: List[Dict[str, Any]]
-    consistency: float
-    accuracy: float
+    consistency: Optional[List[Dict[str, Any]]] = None
+    accuracy: Optional[float] = None
+
 
 
 @dataclass
@@ -52,8 +53,8 @@ class AgentTrajectory:
 @dataclass
 class EvalResult:
     config: Dict[str, Any]
-    total: int
-    consistency: float
-    accuracy: float
     examples: List[ExampleResult]
     trajectories: List[AgentTrajectory] = field(default_factory=list)
+    total: Optional[int] = None
+    consistency: Optional[List[Dict[str, Any]]] = None
+    accuracy: Optional[float] = None
