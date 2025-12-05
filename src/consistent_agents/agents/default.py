@@ -50,8 +50,7 @@ class AgentConfig:
     )
     format_error_template: str = "Please always provide EXACTLY ONE action in triple backticks."
     action_observation_template: str = "Observation: {{output}}"
-    step_limit: int = 10
-    cost_limit: float = 2
+    step_limit: int = 7
 
 
 @dataclass
