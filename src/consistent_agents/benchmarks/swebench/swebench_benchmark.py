@@ -83,7 +83,8 @@ class SWEBenchBenchmark(BaseBenchmark):
             "instance_id": instance_id,
             "env": env,
             "tests_dir": tests_dir,
-            "label": example["patch"]
+            "label": example["patch"],
+            "base_commit": example["base_commit"]
         }
         self._prepared[idx] = state
         return state
@@ -160,15 +161,22 @@ class SWEBenchBenchmark(BaseBenchmark):
         idx: int,
         base_output: str,
         predictions: List[Any], 
+        perturbations: Optional[List[Any]] = None
     ) -> Dict[str, float]:
         """Score predictions by applying patches and running the SWEBench harness."""
         state = self._prepared[idx]
         env = state["env"]
+        base_commit = state.get("base_commit")
 
         env.upload(str(state["tests_dir"]), "/")
 
         base_passed = self._apply_patch_and_test(env, str(base_output))
         outcomes: List[bool] = [base_passed]
+
+        if perturbations is not None:
+            for perturb in perturbations:
+                if getattr(perturb, 'modifies_code', False):
+                    perturb._apply_to_env(env, base_commit=base_commit)
         
         for prediction in predictions:
             pred_passed = self._apply_patch_and_test(env, str(prediction))
