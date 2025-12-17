@@ -44,12 +44,12 @@ def load_benchmark_from_config(bm_cfg: Dict[str, Any]) -> Tuple[BaseBenchmark, L
         if prompt is None:
             continue
         label = ex.get("label") if isinstance(ex.get("label"), (str, int)) else None
-        items.append(BenchmarkItem(id=ex_id, prompt=str(prompt), label=str(label) if label is not None else None, env=ex["env"]))
+        items.append(BenchmarkItem(id=ex_id, prompt=str(prompt), label=str(label) if label is not None else None, env=ex["env"], base_commit=ex.get("base_commit", None)))
     return benchmark, items
 
 # perturbation
-def _instantiate_perturbations(cfg_list: List[Dict[str, Any]]) -> List[Callable[[str], str]]:
-    perts: List[Callable[[str], str]] = []
+def _instantiate_perturbations(cfg_list: List[Dict[str, Any]]) -> List[Tuple[Any, Dict[str, Any]]]:
+    perts: List[Tuple[Any, Dict[str, Any]]] = []
     for pcfg in cfg_list:
         path = pcfg.get("path")
         params = pcfg.get("params", {})
@@ -57,30 +57,44 @@ def _instantiate_perturbations(cfg_list: List[Dict[str, Any]]) -> List[Callable[
             continue
         obj = resolve_object(path)
         inst = maybe_instantiate(obj, params)
-        if hasattr(inst, "apply") and callable(getattr(inst, "apply")):
-            perts.append(lambda text, inst=inst: inst.apply(text))
-        elif callable(inst):
-            perts.append(inst)
-        else:
+        if not (hasattr(inst, "apply") and callable(getattr(inst, "apply"))) and not callable(inst):
             raise TypeError(f"Perturbation at {path} must be callable or implement .apply(text)")
+        perts.append((inst, pcfg))
+        # if hasattr(inst, "apply") and callable(getattr(inst, "apply")):
+        #     perts.append(lambda text, inst=inst: inst.apply(text))
+        # elif callable(inst):
+        #     perts.append(inst)
+        # else:
+        #     raise TypeError(f"Perturbation at {path} must be callable or implement .apply(text)")
     return perts
 
 
 def generate_perturbations(
     text: str,
-    perturb_fns: List[Tuple[Callable[[str], str], Dict[str, Any]]],
+    perturb_instances: List[Tuple[Any, Dict[str, Any]]],
+    # perturb_fns: List[Tuple[Callable[[str], str], Dict[str, Any]]],
     n: int,
     seed: int,
-) -> List[Tuple[str, str]]:
+) -> List[Tuple[str, str, Any]]:
     """Return list of (name, perturbed_text) for the given input text."""
     rng = random.Random(seed)
-    if not perturb_fns:
+    # if not perturb_fns:
+    #     return []
+    if not perturb_instances:
         return []
-    perturb_fns = perturb_fns*n
-    results: List[Tuple[str, str]] = []
-    for (fn, name) in perturb_fns:
-        perturbed = fn(text)
-        results.append((name, perturbed))
+    # perturb_fns = perturb_fns*n
+    perturb_instances = perturb_instances * n
+    results: List[Tuple[str, str, Any]] = []
+    # for (fn, name) in perturb_fns:
+    #     perturbed = fn(text)
+    #     results.append((name, perturbed))
+    for (inst, cfg) in perturb_instances:
+        name = cfg.get("name", inst.__class__.__name__)
+        if hasattr(inst, "apply") and callable(getattr(inst, "apply")):
+            perturbed = inst.apply(text)
+        else:
+            perturbed = inst(text)
+        results.append((name, perturbed, inst))
     return results
 
 
@@ -146,7 +160,8 @@ def evaluate(
     agent_fn: Callable[[str, BaseEnvironment], AgentRunResult],
     benchmark: BaseBenchmark,
     config: EvalConfig,
-    perturb_fns: List[Tuple[Callable[[str], str], Dict[str, Any]]],
+    perturb_instances: List[Tuple[Any, Dict[str, Any]]]
+    # perturb_fns: List[Tuple[Callable[[str], str], Dict[str, Any]]],
 ) -> EvalResult:
     examples: List[ExampleResult] = []
     consistent_count, correct_count, total = 0, 0, 0
@@ -171,17 +186,25 @@ def evaluate(
             base_output = str(base_result)
         perts = generate_perturbations(
             item.prompt,
-            perturb_fns,
+            perturb_instances,
+            # perturb_fns,
             n=config.n_perturbations,
             seed=config.seed,
         )
         perturbed_outputs: List[Dict[str, Any]] = []
-        for p_type, p_text in perts:
+        for p_type, p_text, p_inst in perts:
+            if getattr(p_inst, 'modifies_code', False):
+                base_commit = getattr(item, 'base_commit', None)
+                if hasattr(p_inst, 'apply_to_env'):
+                    p_inst.apply_to_env(item.env, base_commit=base_commit)
+
             pert_result = agent_fn(p_text, item.env)
             if isinstance(pert_result, AgentRunResult):
                 out = pert_result.output
                 pert_metadata = dict(pert_result.metadata)
                 pert_metadata.setdefault("perturbation", p_type)
+                if getattr(p_inst, 'modifies_code', False):
+                    pert_metadata["code_modification"] = getattr(p_inst, 'last_result', {})
                 trajectories.append(
                     AgentTrajectory(
                         example_id=item.id,
@@ -250,11 +273,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     perturb_cfgs = raw_cfg.get("perturbations", [])
     if isinstance(perturb_cfgs, dict):
         perturb_cfgs = [perturb_cfgs]
-    perturb_fns = _instantiate_perturbations(perturb_cfgs)
-    perturb_fns = [(fn, cfg) for fn, cfg in zip(perturb_fns, perturb_cfgs)]
+    perturb_instances  = _instantiate_perturbations(perturb_cfgs)
+    # perturb_fns = [(fn, cfg) for fn, cfg in zip(perturb_fns, perturb_cfgs)]
 
     # Evaluate
-    result = evaluate(items, agent_fn, benchmark, eval_cfg, perturb_fns)
+    result = evaluate(items, agent_fn, benchmark, eval_cfg, perturb_instances)
 
     payload = {
         "config": result.config,

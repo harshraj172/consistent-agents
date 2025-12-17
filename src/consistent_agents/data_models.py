@@ -12,6 +12,7 @@ class BenchmarkItem:
     prompt: str
     env: BaseEnvironment
     label: Optional[str] = None
+    base_commit: Optional[str] = None
 
 
 @dataclass

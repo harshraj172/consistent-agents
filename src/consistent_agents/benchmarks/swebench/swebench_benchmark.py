@@ -83,7 +83,8 @@ class SWEBenchBenchmark(BaseBenchmark):
             "instance_id": instance_id,
             "env": env,
             "tests_dir": tests_dir,
-            "label": example["patch"]
+            "label": example["patch"],
+            "base_commit": example["base_commit"]
         }
         self._prepared[idx] = state
         return state
@@ -105,7 +106,8 @@ class SWEBenchBenchmark(BaseBenchmark):
                 "instance_id": state["instance_id"],
                 "prompt": self._format_prompt(example, state),
                 "env": state["env"],
-                "label": state["label"]
+                "label": state["label"],
+                "base_commit": state["base_commit"]
             }
 
     @staticmethod
