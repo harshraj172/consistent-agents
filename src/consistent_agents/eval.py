@@ -195,8 +195,8 @@ def evaluate(
         for p_type, p_text, p_inst in perts:
             if getattr(p_inst, 'modifies_code', False):
                 base_commit = getattr(item, 'base_commit', None)
-                if hasattr(p_inst, 'apply_to_env'):
-                    p_inst.apply_to_env(item.env, base_commit=base_commit)
+                if hasattr(p_inst, '_apply_to_env'):
+                    p_inst._apply_to_env(item.env, base_commit=base_commit)
 
             pert_result = agent_fn(p_text, item.env)
             if isinstance(pert_result, AgentRunResult):
