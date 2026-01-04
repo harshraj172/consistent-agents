@@ -1,0 +1,586 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import random
+import shutil
+import sys
+import uuid
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+import yaml
+from tqdm.auto import tqdm
+
+from consistent_agents.benchmarks import BaseBenchmark
+from consistent_agents.data_models import (
+    AgentRunResult,
+    AgentTrajectory,
+    BenchmarkItem,
+    EvalConfig,
+    EvalResult,
+    ExampleResult,
+)
+from consistent_agents.utils import maybe_instantiate, resolve_object
+
+# Harbor imports
+from harbor.models.environment_type import EnvironmentType
+from harbor.models.trial.config import (
+    AgentConfig as HarborAgentConfig,
+    EnvironmentConfig as HarborEnvironmentConfig,
+    TaskConfig as HarborTaskConfig,
+    TrialConfig,
+    VerifierConfig as HarborVerifierConfig,
+)
+from harbor.trial.trial import Trial
+
+
+# ------------------------------------------------------------------------------
+# Utility / Config helpers
+# ------------------------------------------------------------------------------
+
+
+def _slugify(text: str) -> str:
+    """Return a Docker/compose-safe slug."""
+    safe = []
+    for ch in text.lower():
+        if ch.isalnum() or ch in "-_":
+            safe.append(ch)
+        else:
+            safe.append("-")
+    slug = "".join(safe).strip("-")
+    return slug or "run"
+
+
+@dataclass
+class HarborTaskOptions:
+    template_path: Path
+    instruction_file: str = "instruction.md"
+    workdir: Path = Path(".harbor_tasks")
+    keep: bool = False
+    rewrite_instruction: bool = True
+
+
+@dataclass
+class HarborOptions:
+    task: HarborTaskOptions
+    agent: Dict[str, Any] = field(default_factory=dict)
+    environment: Dict[str, Any] = field(default_factory=dict)
+    verifier: Dict[str, Any] = field(default_factory=dict)
+    trials_dir: Path = Path("trials")
+    timeout_multiplier: float = 1.0
+    reward_key: Optional[str] = "reward"
+
+    @classmethod
+    def from_dict(cls, cfg: Dict[str, Any]) -> "HarborOptions":
+        if "task" not in cfg or not cfg["task"].get("template_path"):
+            raise ValueError("harbor.task.template_path must be provided")
+
+        task_cfg = cfg["task"]
+        task = HarborTaskOptions(
+            template_path=Path(task_cfg["template_path"]),
+            instruction_file=task_cfg.get("instruction_file", "instruction.md"),
+            workdir=Path(task_cfg.get("workdir", ".harbor_tasks")),
+            keep=bool(task_cfg.get("keep", False)),
+            rewrite_instruction=bool(task_cfg.get("rewrite_instruction", True)),
+        )
+
+        return cls(
+            task=task,
+            agent=cfg.get("agent", {}),
+            environment=cfg.get("environment", {}),
+            verifier=cfg.get("verifier", {}),
+            trials_dir=Path(cfg.get("trials_dir", "trials")),
+            timeout_multiplier=float(cfg.get("timeout_multiplier", 1.0)),
+            reward_key=cfg.get("reward_key", "reward"),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "task": {
+                "template_path": str(self.task.template_path),
+            "instruction_file": self.task.instruction_file,
+            "workdir": str(self.task.workdir),
+            "keep": self.task.keep,
+            "rewrite_instruction": self.task.rewrite_instruction,
+        },
+            "agent": self.agent,
+            "environment": self.environment,
+            "verifier": self.verifier,
+            "trials_dir": str(self.trials_dir),
+            "timeout_multiplier": self.timeout_multiplier,
+            "reward_key": self.reward_key,
+        }
+
+
+def load_benchmark_from_config(bm_cfg: Dict[str, Any]) -> Tuple[BaseBenchmark, List[BenchmarkItem]]:
+    """Create a benchmark instance from config and return items."""
+    path = bm_cfg.get("path")
+    params = bm_cfg.get("params", {})
+    if not path:
+        raise ValueError("benchmark.path must be provided in config.yaml")
+
+    obj = resolve_object(path)
+    benchmark = maybe_instantiate(obj, params)
+    if hasattr(benchmark, "load") and callable(getattr(benchmark, "load")):
+        benchmark.load()
+
+    items: List[BenchmarkItem] = []
+    for ex_id, ex in enumerate(benchmark):
+        prompt = ex["prompt"]
+        if prompt is None:
+            continue
+        label = ex.get("label") if isinstance(ex.get("label"), (str, int)) else None
+        task_dir = ex.get("task_dir")
+        task_dir_path = Path(task_dir) if task_dir else None
+        items.append(
+            BenchmarkItem(
+                id=ex_id,
+                prompt=str(prompt),
+                label=str(label) if label is not None else None,
+                env=ex["env"],
+                task_dir=task_dir_path,
+            )
+        )
+    return benchmark, items
+
+
+def _instantiate_perturbations(cfg_list: List[Dict[str, Any]]) -> List[Callable[[str], str]]:
+    perts: List[Callable[[str], str]] = []
+    for pcfg in cfg_list:
+        path = pcfg.get("path")
+        params = pcfg.get("params", {})
+        if not path:
+            continue
+        obj = resolve_object(path)
+        inst = maybe_instantiate(obj, params)
+        if hasattr(inst, "apply") and callable(getattr(inst, "apply")):
+            perts.append(lambda text, inst=inst: inst.apply(text))
+        elif callable(inst):
+            perts.append(inst)
+        else:
+            raise TypeError(f"Perturbation at {path} must be callable or implement .apply(text)")
+    return perts
+
+
+def generate_perturbations(
+    text: str,
+    perturb_fns: List[Tuple[Callable[[str], str], Dict[str, Any]]],
+    n: int,
+    seed: int,
+) -> List[Tuple[str, str]]:
+    """Return list of (name, perturbed_text) for the given input text."""
+    rng = random.Random(seed)
+    if not perturb_fns:
+        return []
+    perturb_fns = perturb_fns * n
+    results: List[Tuple[str, str]] = []
+    for (fn, name) in perturb_fns:
+        name_str = _slugify(str(name))
+        perturbed = fn(text)
+        results.append((name_str, perturbed))
+    return results
+
+
+# ------------------------------------------------------------------------------
+# Harbor execution helpers
+# ------------------------------------------------------------------------------
+
+
+def _prepare_task_dir(
+    prompt: str,
+    harbor_cfg: HarborOptions,
+    example_id: str,
+    variant: str,
+    source_task_dir: Optional[Path] = None,
+    rewrite_instruction: bool = True,
+) -> Path:
+    """
+    Copy the template task and optionally inject the prompt into the instruction file.
+
+    If `source_task_dir` is provided, that directory is copied verbatim; instruction
+    rewriting can be disabled to preserve pre-generated Harbor tasks (e.g., SWEBench).
+    """
+    src = Path(source_task_dir) if source_task_dir is not None else harbor_cfg.task.template_path
+    if not src.is_dir():
+        raise FileNotFoundError(f"Harbor task template not found: {src}")
+
+    harbor_cfg.task.workdir.mkdir(parents=True, exist_ok=True)
+    safe_variant = _slugify(variant)
+    run_dir = harbor_cfg.task.workdir / f"{example_id}-{safe_variant}-{uuid.uuid4().hex[:8]}"
+    if run_dir.exists():
+        shutil.rmtree(run_dir)
+    shutil.copytree(src, run_dir)
+
+    if rewrite_instruction:
+        instruction_path = run_dir / harbor_cfg.task.instruction_file
+        instruction_path.parent.mkdir(parents=True, exist_ok=True)
+        instruction_path.write_text(prompt, encoding="utf-8")
+    return run_dir
+
+
+def _parse_agent_config(cfg: Dict[str, Any]) -> HarborAgentConfig:
+    agent_fields = {
+        "name",
+        "import_path",
+        "model_name",
+        "override_timeout_sec",
+        "max_timeout_sec",
+        "kwargs",
+    }
+    kwargs = {k: v for k, v in cfg.items() if k in agent_fields}
+    return HarborAgentConfig(**kwargs)
+
+
+def _parse_environment_config(cfg: Dict[str, Any]) -> HarborEnvironmentConfig:
+    env_cfg = dict(cfg)
+    env_type = env_cfg.pop("type", EnvironmentType.DOCKER.value)
+    env_cfg["type"] = EnvironmentType(env_type)
+    return HarborEnvironmentConfig(**env_cfg)
+
+
+def _parse_verifier_config(cfg: Dict[str, Any]) -> HarborVerifierConfig:
+    verifier_fields = {"override_timeout_sec", "max_timeout_sec", "disable"}
+    kwargs = {k: v for k, v in cfg.items() if k in verifier_fields}
+    return HarborVerifierConfig(**kwargs)
+
+
+def _load_agent_messages(trials_dir: Path, trial_name: str) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """
+    Best-effort load of the Harbor agent trajectory for inclusion in the Eval trajectory.
+    Returns the messages list (ATIF steps) and any metadata about the source or errors.
+    """
+    messages: List[Dict[str, Any]] = []
+    meta: Dict[str, Any] = {}
+
+    traj_path = Path(trials_dir) / trial_name / "agent" / "trajectory.json"
+    if not traj_path.is_file():
+        return messages, meta
+
+    meta["agent_trajectory_path"] = str(traj_path)
+
+    try:
+        payload = json.loads(traj_path.read_text())
+        steps = payload.get("steps")
+        if isinstance(steps, list):
+            messages = steps
+        else:
+            meta["agent_trajectory_error"] = "trajectory.json missing 'steps' list"
+    except Exception as exc:  # pragma: no cover - defensive parsing
+        meta["agent_trajectory_error"] = f"failed to parse trajectory.json: {exc}"
+
+    return messages, meta
+
+
+async def _run_trial_async(trial_config: TrialConfig) -> Any:
+    trial = Trial(trial_config)
+    return await trial.run()
+
+
+def _extract_reward_text(rewards: Optional[Dict[str, Any]], reward_key: Optional[str]) -> str:
+    if rewards is None:
+        return ""
+    if reward_key and reward_key in rewards:
+        return str(rewards[reward_key])
+    if rewards:
+        first_val = next(iter(rewards.values()))
+        return "" if first_val is None else str(first_val)
+    return ""
+
+
+def run_harbor_trial(
+    prompt: str,
+    harbor_cfg: HarborOptions,
+    example_id: str,
+    variant: str,
+    *,
+    source_task_dir: Optional[Path] = None,
+    rewrite_instruction: bool = True,
+) -> AgentRunResult:
+    """Run a single Harbor trial and return an AgentRunResult with reward as output."""
+    variant_slug = _slugify(str(variant))
+    task_dir = _prepare_task_dir(
+        prompt,
+        harbor_cfg,
+        str(example_id),
+        variant_slug,
+        source_task_dir=source_task_dir,
+        rewrite_instruction=rewrite_instruction,
+    )
+    trial_name = _slugify(f"{example_id}-{variant_slug}-{uuid.uuid4().hex[:8]}")
+
+    task_cfg = HarborTaskConfig(path=task_dir)
+    agent_cfg = _parse_agent_config(harbor_cfg.agent)
+    env_cfg = _parse_environment_config(harbor_cfg.environment)
+    verifier_cfg = _parse_verifier_config(harbor_cfg.verifier)
+
+    trial_config = TrialConfig(
+        task=task_cfg,
+        trial_name=trial_name,
+        trials_dir=harbor_cfg.trials_dir,
+        timeout_multiplier=harbor_cfg.timeout_multiplier,
+        agent=agent_cfg,
+        environment=env_cfg,
+        verifier=verifier_cfg,
+    )
+
+    metadata: Dict[str, Any] = {
+        "trial_name": trial_name,
+        "task_dir": str(task_dir),
+        "trials_dir": str(harbor_cfg.trials_dir),
+    }
+
+    try:
+        trial_result = asyncio.run(_run_trial_async(trial_config))
+    finally:
+        if not harbor_cfg.task.keep:
+            shutil.rmtree(task_dir, ignore_errors=True)
+
+    status = "OK"
+    reward_dict: Optional[Dict[str, Any]] = None
+
+    if trial_result.exception_info is not None:
+        status = trial_result.exception_info.exception_type
+        metadata["exception"] = trial_result.exception_info.model_dump(mode="json")
+
+    if trial_result.verifier_result is not None:
+        reward_dict = trial_result.verifier_result.rewards
+        metadata["reward"] = reward_dict
+
+    output_text = _extract_reward_text(reward_dict, harbor_cfg.reward_key)
+    messages, traj_meta = _load_agent_messages(harbor_cfg.trials_dir, trial_name)
+    metadata.update(traj_meta)
+
+    metadata["trial_result"] = trial_result.model_dump(mode="json", exclude_none=True)
+
+    return AgentRunResult(
+        output=output_text,
+        status=status,
+        messages=messages,
+        metadata=metadata,
+    )
+
+
+# ------------------------------------------------------------------------------
+# Evaluation loop
+# ------------------------------------------------------------------------------
+
+
+def evaluate(
+    items: List[BenchmarkItem],
+    benchmark: BaseBenchmark,
+    config: EvalConfig,
+    perturb_fns: List[Tuple[Callable[[str], str], Dict[str, Any]]],
+    harbor_cfg: HarborOptions,
+) -> EvalResult:
+    examples: List[ExampleResult] = []
+    trajectories: List[AgentTrajectory] = []
+
+    for item in tqdm(items, desc="Evaluating", unit="ex"):
+        base_result = run_harbor_trial(
+            item.prompt,
+            harbor_cfg,
+            item.id,
+            "base",
+            source_task_dir=item.task_dir,
+            rewrite_instruction=harbor_cfg.task.rewrite_instruction,
+        )
+        base_output = base_result.output
+
+        trajectories.append(
+            AgentTrajectory(
+                example_id=item.id,
+                variant="base",
+                prompt=item.prompt,
+                output=base_output,
+                status=base_result.status,
+                messages=base_result.messages,
+                metadata=dict(base_result.metadata),
+            )
+        )
+
+        perts = generate_perturbations(
+            item.prompt,
+            perturb_fns,
+            n=config.n_perturbations,
+            seed=config.seed,
+        )
+        perturbed_outputs: List[Dict[str, Any]] = []
+
+        for p_type, p_text in perts:
+            pert_result = run_harbor_trial(
+                p_text,
+                harbor_cfg,
+                item.id,
+                p_type,
+                source_task_dir=item.task_dir,
+                rewrite_instruction=harbor_cfg.task.rewrite_instruction,
+            )
+            pert_output = pert_result.output
+
+            pert_metadata = dict(pert_result.metadata)
+            pert_metadata.setdefault("perturbation", p_type)
+
+            trajectories.append(
+                AgentTrajectory(
+                    example_id=item.id,
+                    variant="perturbation",
+                    prompt=p_text,
+                    output=pert_output,
+                    status=pert_result.status,
+                    messages=pert_result.messages,
+                    metadata=pert_metadata,
+                )
+            )
+
+            perturbed_outputs.append(
+                {
+                    "type": p_type,
+                    "prompt": p_text,
+                    "output": pert_output,
+                }
+            )
+
+        benchmark.score(
+            item.id, base_output, [po["output"] for po in perturbed_outputs]
+        )
+        item_score = benchmark.item_score()
+        examples.append(
+            ExampleResult(
+                id=item.id,
+                base_prompt=item.prompt,
+                base_output=base_output,
+                perturbed_outputs=perturbed_outputs,
+                **item_score,
+            )
+        )
+
+    total_score = benchmark.total_score()
+    return EvalResult(
+        config={**asdict(config), "harbor": harbor_cfg.to_dict()},
+        **total_score,
+        examples=examples,
+        trajectories=trajectories,
+    )
+
+
+# ------------------------------------------------------------------------------
+# CLI
+# ------------------------------------------------------------------------------
+
+
+def _load_config(config_path: str | Path) -> Dict[str, Any]:
+    p = Path(config_path)
+    if not p.is_file():
+        raise FileNotFoundError(f"Config file not found: {p}")
+    with p.open("r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    cfg_path = Path(argv[0]) if argv else Path("config.yaml")
+    raw_cfg = _load_config(cfg_path)
+    n_perturbations = int(raw_cfg.get("eval", {}).get("n_perturbations", 5))
+    eval_cfg = EvalConfig(
+        n_perturbations=n_perturbations,
+        seed=int(raw_cfg.get("eval", {}).get("seed", 42)),
+    )
+
+    harbor_cfg = HarborOptions.from_dict(raw_cfg.get("harbor", {}))
+
+    # Benchmark
+    benchmark, items = load_benchmark_from_config(raw_cfg.get("benchmark", {}))
+
+    # Perturbations
+    perturb_cfgs = raw_cfg.get("perturbations", [])
+    if isinstance(perturb_cfgs, dict):
+        perturb_cfgs = [perturb_cfgs]
+    perturb_fns_raw = _instantiate_perturbations(perturb_cfgs)
+    perturb_fns: List[Tuple[Callable[[str], str], Dict[str, Any]]] = []
+    for fn, cfg in zip(perturb_fns_raw, perturb_cfgs):
+        name = cfg.get("name") or cfg.get("path") or "perturbation"
+        perturb_fns.append((fn, name))
+
+    # Evaluate
+    result = evaluate(items, benchmark, eval_cfg, perturb_fns, harbor_cfg)
+
+    payload = {
+        "config": result.config,
+        **{
+            k: v
+            for k, v in {
+                "total": result.total,
+                "consistency": result.consistency,
+                "accuracy": result.accuracy,
+            }.items()
+            if v is not None
+        },
+        "examples": [
+            {
+                "id": ex.id,
+                "base_prompt": ex.base_prompt,
+                "base_output": ex.base_output,
+                "perturbed_outputs": ex.perturbed_outputs,
+                **{
+                    k: v
+                    for k, v in {
+                        "consistency": ex.consistency,
+                        "accuracy": ex.accuracy,
+                    }.items()
+                    if v is not None
+                },
+            }
+            for ex in result.examples
+        ],
+    }
+
+    out_path_str = raw_cfg.get("output", {}).get("path") or raw_cfg.get("out")
+
+    if out_path_str:
+        base_out = Path(out_path_str)
+        if base_out.suffix:
+            base_dir = base_out.parent
+            base_name = base_out.stem
+        else:
+            base_dir = base_out
+            base_name = base_out.name
+
+        if not base_name:
+            base_name = "results"
+
+        timestamp = datetime.now()
+        run_dir_name = f"{base_name}-{timestamp.strftime('%Y-%m-%d::%H-%M-%S')}"
+        run_dir = base_dir / run_dir_name
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        trajectory_filename = "trajectory.json"
+        trajectory_path = run_dir / trajectory_filename
+        result_path = run_dir / "result.json"
+
+        payload["result_trajectory"] = trajectory_filename
+
+        result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+
+        trajectory_payload = {
+            "created_at": timestamp.isoformat(),
+            "results_dir": run_dir_name,
+            "trajectory_file": trajectory_filename,
+            "trajectory_count": len(result.trajectories),
+            "entries": [asdict(entry) for entry in result.trajectories],
+        }
+        trajectory_path.write_text(
+            json.dumps(trajectory_payload, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+
+        print(f"Wrote results to {result_path} and trajectory log to {trajectory_path}")
+    else:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
