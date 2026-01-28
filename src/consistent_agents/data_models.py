@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from consistent_agents.environments import BaseEnvironment
@@ -12,7 +13,7 @@ class BenchmarkItem:
     prompt: str
     env: BaseEnvironment
     label: Optional[str] = None
-    base_commit: Optional[str] = None
+    task_dir: Optional[Path] = None
 
 
 @dataclass
