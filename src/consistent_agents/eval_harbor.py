@@ -72,6 +72,7 @@ class HarborOptions:
     trials_dir: Path = Path("trials")
     timeout_multiplier: float = 1.0
     reward_key: Optional[str] = "reward"
+    n_concurrent: int = 1  # Number of concurrent trials
 
     @classmethod
     def from_dict(cls, cfg: Dict[str, Any]) -> "HarborOptions":
@@ -95,23 +96,25 @@ class HarborOptions:
             trials_dir=Path(cfg.get("trials_dir", "trials")),
             timeout_multiplier=float(cfg.get("timeout_multiplier", 1.0)),
             reward_key=cfg.get("reward_key", "reward"),
+            n_concurrent=int(cfg.get("n_concurrent", 1)),
         )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "task": {
                 "template_path": str(self.task.template_path),
-            "instruction_file": self.task.instruction_file,
-            "workdir": str(self.task.workdir),
-            "keep": self.task.keep,
-            "rewrite_instruction": self.task.rewrite_instruction,
-        },
+                "instruction_file": self.task.instruction_file,
+                "workdir": str(self.task.workdir),
+                "keep": self.task.keep,
+                "rewrite_instruction": self.task.rewrite_instruction,
+            },
             "agent": self.agent,
             "environment": self.environment,
             "verifier": self.verifier,
             "trials_dir": str(self.trials_dir),
             "timeout_multiplier": self.timeout_multiplier,
             "reward_key": self.reward_key,
+            "n_concurrent": self.n_concurrent,
         }
 
 
@@ -274,11 +277,6 @@ def _load_agent_messages(trials_dir: Path, trial_name: str) -> tuple[List[Dict[s
     return messages, meta
 
 
-async def _run_trial_async(trial_config: TrialConfig) -> Any:
-    trial = Trial(trial_config)
-    return await trial.run()
-
-
 def _extract_reward_text(rewards: Optional[Dict[str, Any]], reward_key: Optional[str]) -> str:
     if rewards is None:
         return ""
@@ -290,7 +288,7 @@ def _extract_reward_text(rewards: Optional[Dict[str, Any]], reward_key: Optional
     return ""
 
 
-def run_harbor_trial(
+async def run_harbor_trial_async(
     prompt: str,
     harbor_cfg: HarborOptions,
     example_id: str,
@@ -299,7 +297,7 @@ def run_harbor_trial(
     source_task_dir: Optional[Path] = None,
     rewrite_instruction: bool = True,
 ) -> AgentRunResult:
-    """Run a single Harbor trial and return an AgentRunResult with reward as output."""
+    """Run a single Harbor trial asynchronously and return an AgentRunResult with reward as output."""
     variant_slug = _slugify(str(variant))
     task_dir = _prepare_task_dir(
         prompt,
@@ -333,7 +331,8 @@ def run_harbor_trial(
     }
 
     try:
-        trial_result = asyncio.run(_run_trial_async(trial_config))
+        trial = Trial(trial_config)
+        trial_result = await trial.run()
     finally:
         if not harbor_cfg.task.keep:
             shutil.rmtree(task_dir, ignore_errors=True)
@@ -363,23 +362,42 @@ def run_harbor_trial(
     )
 
 
+def run_harbor_trial(
+    prompt: str,
+    harbor_cfg: HarborOptions,
+    example_id: str,
+    variant: str,
+    *,
+    source_task_dir: Optional[Path] = None,
+    rewrite_instruction: bool = True,
+) -> AgentRunResult:
+    """Run a single Harbor trial synchronously (wrapper for async version)."""
+    return asyncio.run(run_harbor_trial_async(
+        prompt,
+        harbor_cfg,
+        example_id,
+        variant,
+        source_task_dir=source_task_dir,
+        rewrite_instruction=rewrite_instruction,
+    ))
+
+
 # ------------------------------------------------------------------------------
-# Evaluation loop
+# Evaluation loop with parallelism
 # ------------------------------------------------------------------------------
 
 
-def evaluate(
-    items: List[BenchmarkItem],
-    benchmark: BaseBenchmark,
+async def _process_item_async(
+    item: BenchmarkItem,
+    harbor_cfg: HarborOptions,
     config: EvalConfig,
     perturb_fns: List[Tuple[Callable[[str], str], Dict[str, Any]]],
-    harbor_cfg: HarborOptions,
-) -> EvalResult:
-    examples: List[ExampleResult] = []
-    trajectories: List[AgentTrajectory] = []
-
-    for item in tqdm(items, desc="Evaluating", unit="ex"):
-        base_result = run_harbor_trial(
+    semaphore: asyncio.Semaphore,
+) -> Tuple[ExampleResult, List[AgentTrajectory], str, List[str]]:
+    """Process a single benchmark item with all its perturbations."""
+    async with semaphore:
+        # Run base trial
+        base_result = await run_harbor_trial_async(
             item.prompt,
             harbor_cfg,
             item.id,
@@ -389,7 +407,7 @@ def evaluate(
         )
         base_output = base_result.output
 
-        trajectories.append(
+        trajectories = [
             AgentTrajectory(
                 example_id=item.id,
                 variant="base",
@@ -399,7 +417,7 @@ def evaluate(
                 messages=base_result.messages,
                 metadata=dict(base_result.metadata),
             )
-        )
+        ]
 
         perts = generate_perturbations(
             item.prompt,
@@ -408,9 +426,10 @@ def evaluate(
             seed=config.seed,
         )
         perturbed_outputs: List[Dict[str, Any]] = []
+        pert_output_strs: List[str] = []
 
         for p_type, p_text in perts:
-            pert_result = run_harbor_trial(
+            pert_result = await run_harbor_trial_async(
                 p_text,
                 harbor_cfg,
                 item.id,
@@ -442,28 +461,149 @@ def evaluate(
                     "output": pert_output,
                 }
             )
+            pert_output_strs.append(pert_output)
 
-        benchmark.score(
-            item.id, base_output, [po["output"] for po in perturbed_outputs]
+        example_result = ExampleResult(
+            id=item.id,
+            base_prompt=item.prompt,
+            base_output=base_output,
+            perturbed_outputs=perturbed_outputs,
+            accuracy=None,
+            consistency=None,
         )
+
+        return example_result, trajectories, base_output, pert_output_strs
+
+
+async def evaluate_async(
+    items: List[BenchmarkItem],
+    benchmark: BaseBenchmark,
+    config: EvalConfig,
+    perturb_fns: List[Tuple[Callable[[str], str], Dict[str, Any]]],
+    harbor_cfg: HarborOptions,
+    run_dir: Optional[Path] = None,
+    timestamp: Optional[datetime] = None,
+) -> EvalResult:
+    """Evaluate all items with concurrent execution."""
+    n_concurrent = harbor_cfg.n_concurrent
+    semaphore = asyncio.Semaphore(n_concurrent)
+
+    print(f"Running evaluation with n_concurrent={n_concurrent}")
+
+    # Create tasks for all items
+    tasks = [
+        _process_item_async(item, harbor_cfg, config, perturb_fns, semaphore)
+        for item in items
+    ]
+
+    examples: List[ExampleResult] = []
+    all_trajectories: List[AgentTrajectory] = []
+
+    # Process with progress bar
+    for coro in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="Evaluating", unit="ex"):
+        example_result, trajectories, base_output, pert_outputs = await coro
+
+        # Score the item
+        benchmark.score(example_result.id, base_output, pert_outputs)
         item_score = benchmark.item_score()
-        examples.append(
-            ExampleResult(
-                id=item.id,
-                base_prompt=item.prompt,
-                base_output=base_output,
-                perturbed_outputs=perturbed_outputs,
-                **item_score,
-            )
+
+        # Update example with scores
+        example_result = ExampleResult(
+            id=example_result.id,
+            base_prompt=example_result.base_prompt,
+            base_output=example_result.base_output,
+            perturbed_outputs=example_result.perturbed_outputs,
+            **item_score,
         )
+
+        examples.append(example_result)
+        all_trajectories.extend(trajectories)
+
+        # Save incrementally
+        if run_dir is not None:
+            _save_incremental_results(
+                run_dir=run_dir,
+                config={**asdict(config), "harbor": harbor_cfg.to_dict()},
+                examples=examples,
+                trajectories=all_trajectories,
+                benchmark=benchmark,
+                timestamp=timestamp or datetime.now(),
+            )
 
     total_score = benchmark.total_score()
     return EvalResult(
         config={**asdict(config), "harbor": harbor_cfg.to_dict()},
         **total_score,
         examples=examples,
-        trajectories=trajectories,
+        trajectories=all_trajectories,
     )
+
+
+def _save_incremental_results(
+    run_dir: Path,
+    config: Dict[str, Any],
+    examples: List[ExampleResult],
+    trajectories: List[AgentTrajectory],
+    benchmark: BaseBenchmark,
+    timestamp: datetime,
+) -> None:
+    """Save current results incrementally to disk."""
+    total_score = benchmark.total_score()
+
+    payload = {
+        "config": config,
+        "status": "in_progress",
+        "completed_examples": len(examples),
+        **{k: v for k, v in {
+            "total": total_score.get("total"),
+            "consistency": total_score.get("consistency"),
+            "accuracy": total_score.get("accuracy"),
+        }.items() if v is not None},
+        "examples": [
+            {
+                "id": ex.id,
+                "base_prompt": ex.base_prompt,
+                "base_output": ex.base_output,
+                "perturbed_outputs": ex.perturbed_outputs,
+                **{k: v for k, v in {
+                    "consistency": ex.consistency,
+                    "accuracy": ex.accuracy,
+                }.items() if v is not None},
+            }
+            for ex in examples
+        ],
+        "result_trajectory": "trajectory.json",
+    }
+
+    result_path = run_dir / "result.json"
+    result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+
+    trajectory_payload = {
+        "created_at": timestamp.isoformat(),
+        "status": "in_progress",
+        "trajectory_count": len(trajectories),
+        "entries": [asdict(entry) for entry in trajectories],
+    }
+    trajectory_path = run_dir / "trajectory.json"
+    trajectory_path.write_text(
+        json.dumps(trajectory_payload, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+
+
+def evaluate(
+    items: List[BenchmarkItem],
+    benchmark: BaseBenchmark,
+    config: EvalConfig,
+    perturb_fns: List[Tuple[Callable[[str], str], Dict[str, Any]]],
+    harbor_cfg: HarborOptions,
+    run_dir: Optional[Path] = None,
+    timestamp: Optional[datetime] = None,
+) -> EvalResult:
+    """Evaluate with parallelism support."""
+    return asyncio.run(evaluate_async(
+        items, benchmark, config, perturb_fns, harbor_cfg, run_dir, timestamp
+    ))
 
 
 # ------------------------------------------------------------------------------
@@ -503,11 +643,35 @@ def main(argv: Optional[List[str]] = None) -> int:
         name = cfg.get("name") or cfg.get("path") or "perturbation"
         perturb_fns.append((fn, name))
 
-    # Evaluate
-    result = evaluate(items, benchmark, eval_cfg, perturb_fns, harbor_cfg)
+    # Setup output directory early for incremental saves
+    out_path_str = raw_cfg.get("output", {}).get("path") or raw_cfg.get("out")
+    run_dir = None
+    timestamp = datetime.now()
 
+    if out_path_str:
+        base_out = Path(out_path_str)
+        if base_out.suffix:
+            base_dir = base_out.parent
+            base_name = base_out.stem
+        else:
+            base_dir = base_out
+            base_name = base_out.name
+
+        if not base_name:
+            base_name = "results"
+
+        run_dir_name = f"{base_name}-{timestamp.strftime('%Y-%m-%d::%H-%M-%S')}"
+        run_dir = base_dir / run_dir_name
+        run_dir.mkdir(parents=True, exist_ok=True)
+        print(f"Saving results incrementally to: {run_dir}")
+
+    # Evaluate with incremental saving
+    result = evaluate(items, benchmark, eval_cfg, perturb_fns, harbor_cfg, run_dir, timestamp)
+
+    # Final save
     payload = {
         "config": result.config,
+        "status": "completed",
         **{
             k: v
             for k, v in {
@@ -536,25 +700,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         ],
     }
 
-    out_path_str = raw_cfg.get("output", {}).get("path") or raw_cfg.get("out")
-
-    if out_path_str:
-        base_out = Path(out_path_str)
-        if base_out.suffix:
-            base_dir = base_out.parent
-            base_name = base_out.stem
-        else:
-            base_dir = base_out
-            base_name = base_out.name
-
-        if not base_name:
-            base_name = "results"
-
-        timestamp = datetime.now()
-        run_dir_name = f"{base_name}-{timestamp.strftime('%Y-%m-%d::%H-%M-%S')}"
-        run_dir = base_dir / run_dir_name
-        run_dir.mkdir(parents=True, exist_ok=True)
-
+    if run_dir:
         trajectory_filename = "trajectory.json"
         trajectory_path = run_dir / trajectory_filename
         result_path = run_dir / "result.json"
@@ -565,7 +711,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         trajectory_payload = {
             "created_at": timestamp.isoformat(),
-            "results_dir": run_dir_name,
+            "status": "completed",
+            "results_dir": run_dir.name,
             "trajectory_file": trajectory_filename,
             "trajectory_count": len(result.trajectories),
             "entries": [asdict(entry) for entry in result.trajectories],
@@ -575,7 +722,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             encoding="utf-8",
         )
 
-        print(f"Wrote results to {result_path} and trajectory log to {trajectory_path}")
+        print(f"Wrote final results to {result_path} and trajectory log to {trajectory_path}")
     else:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
 
