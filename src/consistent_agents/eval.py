@@ -60,34 +60,22 @@ def _instantiate_perturbations(cfg_list: List[Dict[str, Any]]) -> List[Tuple[Any
         if not (hasattr(inst, "apply") and callable(getattr(inst, "apply"))) and not callable(inst):
             raise TypeError(f"Perturbation at {path} must be callable or implement .apply(text)")
         perts.append((inst, pcfg))
-        # if hasattr(inst, "apply") and callable(getattr(inst, "apply")):
-        #     perts.append(lambda text, inst=inst: inst.apply(text))
-        # elif callable(inst):
-        #     perts.append(inst)
-        # else:
-        #     raise TypeError(f"Perturbation at {path} must be callable or implement .apply(text)")
     return perts
 
 
 def generate_perturbations(
     text: str,
     perturb_instances: List[Tuple[Any, Dict[str, Any]]],
-    # perturb_fns: List[Tuple[Callable[[str], str], Dict[str, Any]]],
     n: int,
     seed: int,
 ) -> List[Tuple[str, str, Any]]:
     """Return list of (name, perturbed_text) for the given input text."""
     rng = random.Random(seed)
-    # if not perturb_fns:
-    #     return []
     if not perturb_instances:
         return []
-    # perturb_fns = perturb_fns*n
     perturb_instances = perturb_instances * n
     results: List[Tuple[str, str, Any]] = []
-    # for (fn, name) in perturb_fns:
-    #     perturbed = fn(text)
-    #     results.append((name, perturbed))
+
     for (inst, cfg) in perturb_instances:
         name = cfg.get("name", inst.__class__.__name__)
         if hasattr(inst, "apply") and callable(getattr(inst, "apply")):
@@ -161,7 +149,6 @@ def evaluate(
     benchmark: BaseBenchmark,
     config: EvalConfig,
     perturb_instances: List[Tuple[Any, Dict[str, Any]]]
-    # perturb_fns: List[Tuple[Callable[[str], str], Dict[str, Any]]],
 ) -> EvalResult:
     examples: List[ExampleResult] = []
     consistent_count, correct_count, total = 0, 0, 0
@@ -187,7 +174,6 @@ def evaluate(
         perts = generate_perturbations(
             item.prompt,
             perturb_instances,
-            # perturb_fns,
             n=config.n_perturbations,
             seed=config.seed,
         )
@@ -274,7 +260,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     if isinstance(perturb_cfgs, dict):
         perturb_cfgs = [perturb_cfgs]
     perturb_instances  = _instantiate_perturbations(perturb_cfgs)
-    # perturb_fns = [(fn, cfg) for fn, cfg in zip(perturb_fns, perturb_cfgs)]
 
     # Evaluate
     result = evaluate(items, agent_fn, benchmark, eval_cfg, perturb_instances)

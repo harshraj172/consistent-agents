@@ -1,4 +1,6 @@
+import re
 import random
+from datetime import datetime
 from typing import Callable, Iterable
 import consistent_agents.perturbations.injection as inj_dir
 
@@ -23,7 +25,7 @@ def inject_time_limit(text: str, **kwargs) -> str:
         return f"You have {set_time_limit} minutes to solve this task.\n" + text
     return text + f"\nYou have {set_time_limit} minutes to solve this task."
 
-def inject_coding_practices(text: str, **kwargs):
+def inject_coding_practices(text: str, **kwargs) -> str:
     """Injects random instructions for maintaining generic coding practices"""
     if not text:
         return text
@@ -41,9 +43,35 @@ def inject_coding_practices(text: str, **kwargs):
         return f"Read the description below. " + instr_add + "\n" + text
     return text + "\nFollow best practices. " + instr_add
 
+def inject_irrelevant_texts(text: str, **kwargs) -> str:
+    """Injects an irrelevant, emotional, factual or enthusiastic statement"""
+    noise_select = kwargs.get("noise_type", 
+                              random.choice(['emotion', 'fact', 'question']))
+
+    lines = re.findall(r'[^.!?]+[.!?]?', text, flags=re.DOTALL)
+    emotions = ['happy', 'angry', 'lonely', 'exhausted', 'stoic', 'ecstatic', 'determined']
+    today = datetime.today()
+    pos = random.randint(0, len(lines))
+
+    if noise_select == "emotion":
+        # Inserts an irrelevant statement about mood
+        insert_noise = f"\nI am feeling very {random.choice(emotions)} today.\n"
+    elif noise_select == "fact":
+        # Inserts a random fact within task description
+        insert_noise = f"\nToday is {today.strftime("%A, %B %d, %Y")}.\n"
+    elif noise_select == "question":
+        # Inserts a sudden question within task description
+        insert_noise = "\nHow are you doing today?\n"
+    else:
+        insert_noise = "\nCarpe Diem!\n"
+
+    lines.insert(pos, insert_noise)
+    return "".join(lines)
+
 inj_dir.INJECTION_FUNCS = (*inj_dir.INJECTION_FUNCS, 
                    inject_time_limit,
-                   inject_coding_practices
+                   inject_coding_practices,
+                   inject_irrelevant_texts
                    )
 
 class LLMInjectionSWEPerturbation(inj_dir.LLMInjectionPerturbation):

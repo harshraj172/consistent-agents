@@ -9,7 +9,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import yaml
 from tqdm.auto import tqdm
@@ -147,8 +147,8 @@ def load_benchmark_from_config(bm_cfg: Dict[str, Any]) -> Tuple[BaseBenchmark, L
     return benchmark, items
 
 
-def _instantiate_perturbations(cfg_list: List[Dict[str, Any]]) -> List[Callable[[str], str]]:
-    perts: List[Callable[[str], str]] = []
+def _instantiate_perturbations(cfg_list: List[Dict[str, Any]]) -> List[Tuple[Any, Dict[str, Any]]]:
+    perts: List[Tuple[Any, Dict[str, Any]]] = []
     for pcfg in cfg_list:
         path = pcfg.get("path")
         params = pcfg.get("params", {})
@@ -156,31 +156,43 @@ def _instantiate_perturbations(cfg_list: List[Dict[str, Any]]) -> List[Callable[
             continue
         obj = resolve_object(path)
         inst = maybe_instantiate(obj, params)
-        if hasattr(inst, "apply") and callable(getattr(inst, "apply")):
-            perts.append(lambda text, inst=inst: inst.apply(text))
-        elif callable(inst):
-            perts.append(inst)
-        else:
+        if not (hasattr(inst, "apply") and callable(getattr(inst, "apply"))) and not callable(inst):
             raise TypeError(f"Perturbation at {path} must be callable or implement .apply(text)")
+        
+        perts.append((inst, pcfg))
     return perts
 
 
 def generate_perturbations(
     text: str,
-    perturb_fns: List[Tuple[Callable[[str], str], Dict[str, Any]]],
+    perturb_entries: List[Tuple[Any, Union[Dict[str, Any], str]]],
     n: int,
     seed: int,
+    instance_id: Optional[str] = None,
 ) -> List[Tuple[str, str]]:
-    """Return list of (name, perturbed_text) for the given input text."""
+    """Return list of (name, perturbed_text, instance) for the given input text."""
     rng = random.Random(seed)
-    if not perturb_fns:
+    if not perturb_entries:
         return []
-    perturb_fns = perturb_fns * n
-    results: List[Tuple[str, str]] = []
-    for (fn, name) in perturb_fns:
+    perturb_entries = perturb_entries * n
+    results: List[Tuple[str, str, Any]] = []
+    for entry in perturb_entries:
+        inst_or_fn, name_or_cfg = entry
+        if isinstance(name_or_cfg, dict):
+            name = name_or_cfg.get("name", getattr(inst_or_fn, "name", inst_or_fn.__class__.__name__))
+        else:
+            name = str(name_or_cfg)
         name_str = _slugify(str(name))
-        perturbed = fn(text)
-        results.append((name_str, perturbed))
+        if hasattr(inst_or_fn, "apply") and callable(getattr(inst_or_fn, "apply")):
+            if getattr(inst_or_fn, "modifies_task_dir", False) and instance_id:
+                perturbed = inst_or_fn.apply(text, instance_id=instance_id)
+            else:
+                perturbed = inst_or_fn.apply(text)
+        elif callable(inst_or_fn):
+            perturbed = inst_or_fn(text)
+        else:
+            perturbed = text
+        results.append((name_str, perturbed, inst_or_fn))
     return results
 
 
@@ -196,6 +208,8 @@ def _prepare_task_dir(
     variant: str,
     source_task_dir: Optional[Path] = None,
     rewrite_instruction: bool = True,
+    perturbation: Optional[Any] = None,
+    perturbation_kwargs: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """
     Copy the template task and optionally inject the prompt into the instruction file.
@@ -214,6 +228,10 @@ def _prepare_task_dir(
         shutil.rmtree(run_dir)
     shutil.copytree(src, run_dir)
 
+    if perturbation is not None and getattr(perturbation, 'modifies_task_dir', False):
+        kwargs = perturbation_kwargs or {}
+        if hasattr(perturbation, 'apply_to_task_dir'):
+            perturbation.apply_to_task_dir(run_dir, **kwargs)
     if rewrite_instruction:
         instruction_path = run_dir / harbor_cfg.task.instruction_file
         instruction_path.parent.mkdir(parents=True, exist_ok=True)
@@ -298,6 +316,8 @@ def run_harbor_trial(
     *,
     source_task_dir: Optional[Path] = None,
     rewrite_instruction: bool = True,
+    perturbation: Optional[Any] = None,
+    perturbation_kwargs: Optional[Dict[str, Any]] = None,
 ) -> AgentRunResult:
     """Run a single Harbor trial and return an AgentRunResult with reward as output."""
     variant_slug = _slugify(str(variant))
@@ -308,6 +328,8 @@ def run_harbor_trial(
         variant_slug,
         source_task_dir=source_task_dir,
         rewrite_instruction=rewrite_instruction,
+        perturbation=perturbation,
+        perturbation_kwargs=perturbation_kwargs
     )
     trial_name = _slugify(f"{example_id}-{variant_slug}-{uuid.uuid4().hex[:8]}")
 
@@ -372,13 +394,16 @@ def evaluate(
     items: List[BenchmarkItem],
     benchmark: BaseBenchmark,
     config: EvalConfig,
-    perturb_fns: List[Tuple[Callable[[str], str], Dict[str, Any]]],
+    perturb_entries: List[Tuple[Callable[[str], str], Dict[str, Any]]],
     harbor_cfg: HarborOptions,
 ) -> EvalResult:
     examples: List[ExampleResult] = []
     trajectories: List[AgentTrajectory] = []
 
     for item in tqdm(items, desc="Evaluating", unit="ex"):
+        instance_id = getattr(item, 'instance_id', None)
+        if instance_id is None:
+            instance_id = str(item.id)
         base_result = run_harbor_trial(
             item.prompt,
             harbor_cfg,
@@ -403,13 +428,28 @@ def evaluate(
 
         perts = generate_perturbations(
             item.prompt,
-            perturb_fns,
+            perturb_entries,
             n=config.n_perturbations,
             seed=config.seed,
+            instance_id=instance_id,
         )
         perturbed_outputs: List[Dict[str, Any]] = []
 
-        for p_type, p_text in perts:
+        for p_type, p_text, p_inst in perts:
+            perturbation_kwargs = None
+            if getattr(p_inst, 'modifies_code', False):
+                base_commit = getattr(item, 'base_commit', None)
+                if hasattr(p_inst, '_apply_to_env'):
+                    p_inst._apply_to_env(item.env, base_commit=base_commit)
+
+            is_task_dir_perturbation = getattr(p_inst, 'modifies_task_dir', False)
+            
+            if is_task_dir_perturbation:
+                perturbation_kwargs = {
+                    "instance_id": instance_id,
+                    "problem_statement": item.prompt,
+                    "repo": getattr(item, 'repo', None),
+                }
             pert_result = run_harbor_trial(
                 p_text,
                 harbor_cfg,
@@ -417,11 +457,18 @@ def evaluate(
                 p_type,
                 source_task_dir=item.task_dir,
                 rewrite_instruction=harbor_cfg.task.rewrite_instruction,
+                perturbation=p_inst if is_task_dir_perturbation else None,
+                perturbation_kwargs=perturbation_kwargs,
             )
             pert_output = pert_result.output
 
             pert_metadata = dict(pert_result.metadata)
             pert_metadata.setdefault("perturbation", p_type)
+
+            if is_task_dir_perturbation:
+                pert_metadata["task_dir_modification"] = getattr(p_inst, 'last_result', {})
+            if getattr(p_inst, 'modifies_code', False):
+                    pert_metadata["code_modification"] = getattr(p_inst, 'last_result', {})
 
             trajectories.append(
                 AgentTrajectory(
@@ -497,14 +544,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     perturb_cfgs = raw_cfg.get("perturbations", [])
     if isinstance(perturb_cfgs, dict):
         perturb_cfgs = [perturb_cfgs]
-    perturb_fns_raw = _instantiate_perturbations(perturb_cfgs)
-    perturb_fns: List[Tuple[Callable[[str], str], Dict[str, Any]]] = []
-    for fn, cfg in zip(perturb_fns_raw, perturb_cfgs):
+    perturb_entries_raw = _instantiate_perturbations(perturb_cfgs)
+    perturb_entries: List[Tuple[Callable[[str], str], Dict[str, Any]]] = []
+    for fn, cfg in zip(perturb_entries_raw, perturb_cfgs):
         name = cfg.get("name") or cfg.get("path") or "perturbation"
-        perturb_fns.append((fn, name))
+        perturb_entries.append((fn, name))
 
     # Evaluate
-    result = evaluate(items, benchmark, eval_cfg, perturb_fns, harbor_cfg)
+    result = evaluate(items, benchmark, eval_cfg, perturb_entries, harbor_cfg)
 
     payload = {
         "config": result.config,
