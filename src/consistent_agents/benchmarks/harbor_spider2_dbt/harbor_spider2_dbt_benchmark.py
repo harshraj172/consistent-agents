@@ -64,7 +64,19 @@ class HarborSpider2DBTBenchmark(BaseBenchmark):
         n = len(all_ids)
         if n == 0:
             return []
-        k = int(st) if isinstance(st, int) else int(round(n * (float(st) / 100.0 if float(st) > 1 else float(st))))
+        # Sampling modes:
+        # - int: exact number of tasks
+        # - float: fraction of tasks in [0, 1]
+        if isinstance(st, int):
+            k = int(st)
+        else:
+            frac = float(st)
+            if frac > 1.0:
+                raise ValueError(
+                    f"sample_tasks={st} looks like a percentage; percent sampling is not supported. "
+                    "Use an int for an absolute count (e.g. 20) or a float fraction in [0, 1] (e.g. 0.2)."
+                )
+            k = int(round(n * frac))
         k = max(0, min(k, n))
         if k == n:
             return list(all_ids)
