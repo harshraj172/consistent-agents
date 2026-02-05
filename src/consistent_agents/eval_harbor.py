@@ -135,15 +135,22 @@ def load_benchmark_from_config(bm_cfg: Dict[str, Any]) -> Tuple[BaseBenchmark, L
         label = ex.get("label") if isinstance(ex.get("label"), (str, int)) else None
         task_dir = ex.get("task_dir")
         task_dir_path = Path(task_dir) if task_dir else None
-        items.append(
-            BenchmarkItem(
-                id=ex_id,
-                prompt=str(prompt),
-                label=str(label) if label is not None else None,
-                env=ex["env"],
-                task_dir=task_dir_path,
-            )
+        item = BenchmarkItem(
+            id=ex_id,
+            prompt=str(prompt),
+            label=str(label) if label is not None else None,
+            env=ex["env"],
+            task_dir=task_dir_path,
         )
+        
+        if "instance_id" in ex:
+            item.instance_id = ex["instance_id"]
+        if "base_commit" in ex:
+            item.base_commit = ex.get("base_commit")
+        if "repo" in ex:
+            item.repo = ex.get("repo")
+            
+        items.append(item)
     return benchmark, items
 
 
@@ -228,10 +235,14 @@ def _prepare_task_dir(
         shutil.rmtree(run_dir)
     shutil.copytree(src, run_dir)
 
+    perturbation_manages_instruction = False
     if perturbation is not None and getattr(perturbation, 'modifies_task_dir', False):
         kwargs = perturbation_kwargs or {}
         if hasattr(perturbation, 'apply_to_task_dir'):
-            perturbation.apply_to_task_dir(run_dir, **kwargs)
+            result = perturbation.apply_to_task_dir(run_dir, **kwargs)
+            # Check if perturbation wants to prevent instruction rewrite
+            if isinstance(result, dict) and result.get('prevent_instruction_rewrite'):
+                perturbation_manages_instruction = True
     if rewrite_instruction:
         instruction_path = run_dir / harbor_cfg.task.instruction_file
         instruction_path.parent.mkdir(parents=True, exist_ok=True)

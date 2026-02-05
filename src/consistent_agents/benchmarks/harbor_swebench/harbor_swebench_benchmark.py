@@ -82,6 +82,11 @@ class HarborSWEBenchBenchmark(BaseBenchmark):
                 "task_dir": task_dir,
                 "prompt": prompt,
                 "label": example.get("patch"),
+                "base_commit": example.get("base_commit"),
+                "repo": example.get("repo"),
+                "version": example.get("version"),
+                "test_patch": example.get("test_patch"),
+                "problem_statement": example.get("problem_statement"),
             }
             self._prepared[idx] = state
 
@@ -93,12 +98,17 @@ class HarborSWEBenchBenchmark(BaseBenchmark):
         env = LocalEnvironment(name="harbor-local")
         for idx in range(len(self.dataset)):
             state = self._prepared[idx]
+            example = self.dataset[idx]
             yield {
                 "instance_id": state["instance_id"],
                 "prompt": state["prompt"],
                 "env": env,
                 "label": state.get("label"),
                 "task_dir": state["task_dir"],
+                "base_commit": example.get("base_commit"),
+                "repo": example.get("repo"),
+                "version": example.get("version"),
+                "test_patch": example.get("test_patch"),
             }
 
     def score(self, idx: int, base_output: str, predictions: List[Any]) -> Dict[str, float]:
