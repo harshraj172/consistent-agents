@@ -1,12 +1,9 @@
 from pathlib import Path
 from typing import Optional
-import torch
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 
 __all__ = ["entailment", "entailment_bert", "entailment_openai"]
-
-from consistent_agents.models.hfmodel import get_huggingface_model
 
 
 def entailment(
@@ -64,6 +61,15 @@ def entailment_bert(
     Checks bidirectional entailment: (output1 -> output2) AND (output2 -> output1)
     Returns 1.0 if mutually entailed, 0.0 otherwise.
     """
+    try:
+        import torch
+        from consistent_agents.models.hfmodel import get_huggingface_model
+    except ImportError as e:
+        raise ImportError(
+            "torch and transformers are required for BERT-based entailment. "
+            "Install with: pip install torch transformers"
+        ) from e
+
     try:
         nli = get_huggingface_model(judge_model, model_type="sequence_classification")
         inputs = nli.tokenizer(

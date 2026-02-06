@@ -144,6 +144,7 @@ class Spider2DBTAdapter:
         Returns:
             Path to the created task directory
         """
+<<<<<<< HEAD
         def _tpl(*parts: str) -> Path:
             """
             Resolve a template path.
@@ -161,6 +162,8 @@ class Spider2DBTAdapter:
                     return flat
             return nested
 
+=======
+>>>>>>> f7ce8c458ee919a290de5f94e21634bca5de5d87
         task_dir = self.output_dir / local_task_id
         task_dir.mkdir(parents=True, exist_ok=True)
 
@@ -223,7 +226,11 @@ class Spider2DBTAdapter:
                 shutil.copytree(item, dest)
 
         # Copy Dockerfile template
+<<<<<<< HEAD
         dockerfile_template = _tpl("environment", "Dockerfile")
+=======
+        dockerfile_template = self.template_dir / "environment" / "Dockerfile"
+>>>>>>> f7ce8c458ee919a290de5f94e21634bca5de5d87
         shutil.copy(dockerfile_template, environment_dir / "Dockerfile")
 
         # Copy gold database to tests directory (4-tier fallback strategy)
@@ -293,17 +300,29 @@ class Spider2DBTAdapter:
         )
 
         # Copy test scripts
+<<<<<<< HEAD
         test_sh_src = _tpl("tests", "test.sh")
+=======
+        test_sh_src = self.template_dir / "tests" / "test.sh"
+>>>>>>> f7ce8c458ee919a290de5f94e21634bca5de5d87
         test_sh_dst = tests_dir / "test.sh"
         shutil.copy(test_sh_src, test_sh_dst)
         test_sh_dst.chmod(0o755)
 
+<<<<<<< HEAD
         test_py_src = _tpl("tests", "test_dbt.py")
+=======
+        test_py_src = self.template_dir / "tests" / "test_dbt.py"
+>>>>>>> f7ce8c458ee919a290de5f94e21634bca5de5d87
         test_py_dst = tests_dir / "test_dbt.py"
         shutil.copy(test_py_src, test_py_dst)
 
         # Copy solution script
+<<<<<<< HEAD
         solve_sh_src = _tpl("solution", "solve.sh")
+=======
+        solve_sh_src = self.template_dir / "solution" / "solve.sh"
+>>>>>>> f7ce8c458ee919a290de5f94e21634bca5de5d87
         solve_sh_dst = solution_dir / "solve.sh"
         shutil.copy(solve_sh_src, solve_sh_dst)
         solve_sh_dst.chmod(0o755)
