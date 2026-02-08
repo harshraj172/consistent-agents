@@ -235,14 +235,15 @@ def _prepare_task_dir(
         shutil.rmtree(run_dir)
     shutil.copytree(src, run_dir)
 
-    perturbation_manages_instruction = False
     if perturbation is not None and getattr(perturbation, 'modifies_task_dir', False):
         kwargs = perturbation_kwargs or {}
         if hasattr(perturbation, 'apply_to_task_dir'):
             result = perturbation.apply_to_task_dir(run_dir, **kwargs)
-            # Check if perturbation wants to prevent instruction rewrite
+            if getattr(perturbation, 'modifies_code', False):
+                if hasattr(perturbation, '_transform_solution_dir'):
+                    perturbation._transform_solution_dir(run_dir)
             if isinstance(result, dict) and result.get('prevent_instruction_rewrite'):
-                perturbation_manages_instruction = True
+                rewrite_instruction = False
     if rewrite_instruction:
         instruction_path = run_dir / harbor_cfg.task.instruction_file
         instruction_path.parent.mkdir(parents=True, exist_ok=True)
@@ -448,11 +449,6 @@ def evaluate(
 
         for p_type, p_text, p_inst in perts:
             perturbation_kwargs = None
-            if getattr(p_inst, 'modifies_code', False):
-                base_commit = getattr(item, 'base_commit', None)
-                if hasattr(p_inst, '_apply_to_env'):
-                    p_inst._apply_to_env(item.env, base_commit=base_commit)
-
             is_task_dir_perturbation = getattr(p_inst, 'modifies_task_dir', False)
             
             if is_task_dir_perturbation:
@@ -460,6 +456,7 @@ def evaluate(
                     "instance_id": instance_id,
                     "problem_statement": item.prompt,
                     "repo": getattr(item, 'repo', None),
+                    "base_commit": getattr(item, 'base_commit', None),
                 }
             pert_result = run_harbor_trial(
                 p_text,
@@ -477,7 +474,24 @@ def evaluate(
             pert_metadata.setdefault("perturbation", p_type)
 
             if is_task_dir_perturbation:
-                pert_metadata["task_dir_modification"] = getattr(p_inst, 'last_result', {})
+                task_mod = getattr(p_inst, 'last_result', {})
+                pert_metadata["task_dir_modification"] = task_mod
+
+                if task_mod.get("rename"):
+                    old_name, new_name = task_mod["rename"]
+                    pert_metadata["variable_renamed"] = {
+                        "old_name": old_name,
+                        "new_name": new_name,
+                    }
+                if task_mod.get("solution_files_transformed"):
+                    pert_metadata["solution_files_transformed"] = task_mod[
+                        "solution_files_transformed"
+                    ]
+                if task_mod.get("fetched_extensions"):
+                    pert_metadata["fetched_extensions"] = task_mod[
+                        "fetched_extensions"
+                    ]
+                
             if getattr(p_inst, 'modifies_code', False):
                     pert_metadata["code_modification"] = getattr(p_inst, 'last_result', {})
 
@@ -557,9 +571,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         perturb_cfgs = [perturb_cfgs]
     perturb_entries_raw = _instantiate_perturbations(perturb_cfgs)
     perturb_entries: List[Tuple[Callable[[str], str], Dict[str, Any]]] = []
-    for fn, cfg in zip(perturb_entries_raw, perturb_cfgs):
+    for (inst, _pcfg), cfg in zip(perturb_entries_raw, perturb_cfgs):
         name = cfg.get("name") or cfg.get("path") or "perturbation"
-        perturb_entries.append((fn, name))
+        perturb_entries.append((inst, name))
 
     # Evaluate
     result = evaluate(items, benchmark, eval_cfg, perturb_entries, harbor_cfg)

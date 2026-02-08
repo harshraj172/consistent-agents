@@ -10,13 +10,15 @@ from pathlib import Path
 from textwrap import dedent
 from typing import Optional, Dict, Any
 
+from consistent_agents.perturbations.base import BasePerturbation
+
 try:
     import toml
 except ImportError:
     toml = None
 
 
-class LinearMCPPerturbation:
+class LinearMCPPerturbation(BasePerturbation):
     """
     Perturbation that replaces direct problem statement with MCP-based retrieval.
     
