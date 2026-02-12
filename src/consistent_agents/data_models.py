@@ -14,6 +14,9 @@ class BenchmarkItem:
     env: BaseEnvironment
     label: Optional[str] = None
     task_dir: Optional[Path] = None
+    instance_id: Optional[str] = None
+    base_commit: Optional[str] = None
+    repo: Optional[str] = None
 
 
 @dataclass
