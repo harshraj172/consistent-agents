@@ -25,14 +25,14 @@ from consistent_agents.utils import maybe_instantiate, resolve_object
 from consistent_agents.benchmarks import BaseBenchmark
 from consistent_agents.environments import BaseEnvironment
 
-    
+
 def load_benchmark_from_config(bm_cfg: Dict[str, Any]) -> Tuple[BaseBenchmark, List[BenchmarkItem]]:
     """Create a benchmark instance from config and return items."""
     path = bm_cfg.get("path")
     params = bm_cfg.get("params", {})
     if not path:
         raise ValueError("benchmark.path must be provided in config.yaml")
-    
+
     obj = resolve_object(path)
     benchmark = maybe_instantiate(obj, params)
     if hasattr(benchmark, "load") and callable(getattr(benchmark, "load")):
@@ -95,7 +95,7 @@ def resolve_agent_callable(cfg: Dict[str, Any]) -> Callable[[str, BaseEnvironmen
         raise ValueError("agent.path must be provided in config.yaml")
 
     obj = resolve_object(path)
-    
+
     if isinstance(obj, type):
         model = None
         if cfg.get("model"):
@@ -105,7 +105,7 @@ def resolve_agent_callable(cfg: Dict[str, Any]) -> Callable[[str, BaseEnvironmen
                 model = maybe_instantiate(resolve_object(mpath), mparams)
         else:
             raise ValueError("agent.model.path must be provided in config.yaml")
-        
+
         instance = obj(model=model, **params)
 
         if hasattr(instance, "run") and callable(getattr(instance, "run")):
@@ -142,13 +142,67 @@ def resolve_agent_callable(cfg: Dict[str, Any]) -> Callable[[str, BaseEnvironmen
     )
 
 
+def _save_incremental_results(
+    run_dir: Path,
+    config: Dict[str, Any],
+    examples: List[ExampleResult],
+    trajectories: List[AgentTrajectory],
+    benchmark: BaseBenchmark,
+    timestamp: datetime,
+) -> None:
+    """Save current results incrementally to disk."""
+    total_score = benchmark.total_score()
+
+    payload = {
+        "config": config,
+        "status": "in_progress",
+        "completed_examples": len(examples),
+        **{k: v for k, v in {
+            "total": total_score.get("total"),
+            "consistency": total_score.get("consistency"),
+            "accuracy": total_score.get("accuracy"),
+        }.items() if v is not None},
+        "examples": [
+            {
+                "id": ex.id,
+                "base_prompt": ex.base_prompt,
+                "base_output": ex.base_output,
+                "perturbed_outputs": ex.perturbed_outputs,
+                **{k: v for k, v in {
+                    "consistency": ex.consistency,
+                    "accuracy": ex.accuracy,
+                }.items() if v is not None},
+            }
+            for ex in examples
+        ],
+        "result_trajectory": "trajectory.json",
+    }
+
+    result_path = run_dir / "result.json"
+    result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+
+    trajectory_payload = {
+        "created_at": timestamp.isoformat(),
+        "status": "in_progress",
+        "trajectory_count": len(trajectories),
+        "entries": [asdict(entry) for entry in trajectories],
+    }
+    trajectory_path = run_dir / "trajectory.json"
+    trajectory_path.write_text(
+        json.dumps(trajectory_payload, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+
+
 # Evaluation loop
 def evaluate(
     items: List[BenchmarkItem],
     agent_fn: Callable[[str, BaseEnvironment], AgentRunResult],
     benchmark: BaseBenchmark,
     config: EvalConfig,
-    perturb_instances: List[Tuple[Any, Dict[str, Any]]]
+    perturb_fns: List[Tuple[Callable[[str], str], Dict[str, Any]]],
+    run_dir: Optional[Path] = None,
+    timestamp: Optional[datetime] = None,
 ) -> EvalResult:
     examples: List[ExampleResult] = []
     consistent_count, correct_count, total = 0, 0, 0
@@ -223,6 +277,17 @@ def evaluate(
             )
         )
 
+        # Save results incrementally after each example
+        if run_dir is not None:
+            _save_incremental_results(
+                run_dir=run_dir,
+                config=asdict(config),
+                examples=examples,
+                trajectories=trajectories,
+                benchmark=benchmark,
+                timestamp=timestamp or datetime.now(),
+            )
+
     total_score = benchmark.total_score()
     return EvalResult(
         config=asdict(config),
@@ -251,7 +316,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Benchmark
     benchmark, items = load_benchmark_from_config(raw_cfg.get("benchmark", {}))
-    
+
     # Agent
     agent_fn = resolve_agent_callable(raw_cfg.get("agent", {}))
 
@@ -261,11 +326,39 @@ def main(argv: Optional[List[str]] = None) -> int:
         perturb_cfgs = [perturb_cfgs]
     perturb_instances  = _instantiate_perturbations(perturb_cfgs)
 
-    # Evaluate
-    result = evaluate(items, agent_fn, benchmark, eval_cfg, perturb_instances)
+    # Setup output directory early for incremental saves
+    out_path_str = raw_cfg.get("output", {}).get("path") or raw_cfg.get("out")
+    run_dir = None
+    timestamp = datetime.now()
 
+    if out_path_str:
+        base_out = Path(out_path_str)
+        if base_out.suffix:
+            base_dir = base_out.parent
+            base_name = base_out.stem
+        else:
+            base_dir = base_out
+            base_name = base_out.name
+
+        if not base_name:
+            base_name = "results"
+
+        run_dir_name = f"{base_name}-{timestamp.strftime('%Y-%m-%d::%H-%M-%S')}"
+        run_dir = base_dir / run_dir_name
+        run_dir.mkdir(parents=True, exist_ok=True)
+        print(f"Saving results incrementally to: {run_dir}")
+
+    # Evaluate with incremental saving
+    result = evaluate(
+        items, agent_fn, benchmark, eval_cfg, perturb_fns,
+        run_dir=run_dir,
+        timestamp=timestamp,
+    )
+
+    # Final save with completed status
     payload = {
         "config": result.config,
+        "status": "completed",
         **{k: v for k, v in {
             "total": result.total,
             "consistency": result.consistency,
@@ -286,46 +379,29 @@ def main(argv: Optional[List[str]] = None) -> int:
         ],
     }
 
-    out_path_str = raw_cfg.get("output", {}).get("path") or raw_cfg.get("out")
-
-    if out_path_str:
-        base_out = Path(out_path_str)
-        if base_out.suffix:
-            base_dir = base_out.parent
-            base_name = base_out.stem
-        else:
-            base_dir = base_out
-            base_name = base_out.name
-
-        if not base_name:
-            base_name = "results"
-
-        timestamp = datetime.now()
-        run_dir_name = f"{base_name}-{timestamp.strftime('%Y-%m-%d::%H-%M-%S')}"
-        run_dir = base_dir / run_dir_name
-        run_dir.mkdir(parents=True, exist_ok=True)
-
-        trajectory_filename = f"trajectory.json"
+    if run_dir:
+        trajectory_filename = "trajectory.json"
         trajectory_path = run_dir / trajectory_filename
         result_path = run_dir / "result.json"
 
         payload["result_trajectory"] = trajectory_filename
 
-        result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
 
         trajectory_payload = {
             "created_at": timestamp.isoformat(),
-            "results_dir": run_dir_name,
+            "status": "completed",
+            "results_dir": run_dir.name,
             "trajectory_file": trajectory_filename,
             "trajectory_count": len(result.trajectories),
             "entries": [asdict(entry) for entry in result.trajectories],
         }
         trajectory_path.write_text(
-            json.dumps(trajectory_payload, ensure_ascii=False, indent=2),
+            json.dumps(trajectory_payload, ensure_ascii=False, indent=2, default=str),
             encoding="utf-8",
         )
 
-        print(f"Wrote results to {result_path} and trajectory log to {trajectory_path}")
+        print(f"Wrote final results to {result_path} and trajectory log to {trajectory_path}")
     else:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
 

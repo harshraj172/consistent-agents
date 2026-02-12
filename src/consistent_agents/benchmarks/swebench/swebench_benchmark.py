@@ -186,6 +186,19 @@ class SWEBenchBenchmark(BaseBenchmark):
         self.total_scores["correct_count"] += correct_count
         self.total_scores["total"] += total
 
+        # Cleanup: stop and remove the Docker container after scoring
+        try:
+            env.stop()
+        except Exception as e:
+            pass  # Best effort cleanup
+
+        # Also clean up the temporary directory
+        try:
+            tests_dir = state.get("tests_dir")
+            if tests_dir and Path(tests_dir).parent.exists():
+                shutil.rmtree(Path(tests_dir).parent, ignore_errors=True)
+        except Exception:
+            pass  # Best effort cleanup
 
     def item_score(self) -> Dict[str, float]:
         """Get the scores for a specific item."""

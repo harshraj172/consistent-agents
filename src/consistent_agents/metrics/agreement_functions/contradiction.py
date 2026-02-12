@@ -1,12 +1,9 @@
 from pathlib import Path
 from typing import Optional
-import torch
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 
 __all__ = ["contradiction", "contradiction_bert", "contradiction_openai"]
-
-from consistent_agents.models.hfmodel import get_huggingface_model
 
 
 def contradiction(
@@ -64,7 +61,16 @@ def contradiction_bert(
     BERT-based contradiction function using MNLI.
     Returns 0.0 if they contradict, 1.0 otherwise.
     """
-    try:    
+    try:
+        import torch
+        from consistent_agents.models.hfmodel import get_huggingface_model
+    except ImportError as e:
+        raise ImportError(
+            "torch and transformers are required for BERT-based contradiction. "
+            "Install with: pip install torch transformers"
+        ) from e
+
+    try:
         nli = get_huggingface_model(judge_model, model_type="sequence_classification")
         inputs = nli.tokenizer(
             output1, output2, return_tensors="pt", padding=True

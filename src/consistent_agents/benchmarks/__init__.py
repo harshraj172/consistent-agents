@@ -8,4 +8,14 @@ try:
 except (ImportError, ModuleNotFoundError):
     SWEBenchBenchmark = None  # 'resource' unavailable on windows; check for non-WSL environment
 
-__all__ = ['BaseBenchmark', 'TruthfulQABenchmark', 'SWEBenchBenchmark', 'HarborSWEBenchBenchmark']
+try:
+    from .bfcl import BFCLBenchmark
+except (ImportError, ModuleNotFoundError):
+    BFCLBenchmark = None
+
+try:
+    from .harbor_bfcl import HarborBFCLBenchmark
+except (ImportError, ModuleNotFoundError):
+    HarborBFCLBenchmark = None
+
+__all__ = ['BaseBenchmark', 'TruthfulQABenchmark', 'SWEBenchBenchmark', 'HarborSWEBenchBenchmark', 'BFCLBenchmark', 'HarborBFCLBenchmark']
