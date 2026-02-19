@@ -138,13 +138,16 @@ def load_benchmark_from_config(bm_cfg: Dict[str, Any]) -> Tuple[BaseBenchmark, L
         label = ex.get("label") if isinstance(ex.get("label"), (str, int)) else None
         task_dir = ex.get("task_dir")
         task_dir_path = Path(task_dir) if task_dir else None
+        item_id = ex.get("instance_id", ex_id)
+        metadata = dict(ex.get("metadata") or {})
         items.append(
             BenchmarkItem(
-                id=ex_id,
+                id=str(item_id),
                 prompt=str(prompt),
                 label=str(label) if label is not None else None,
                 env=ex["env"],
                 task_dir=task_dir_path,
+                metadata=metadata,
             )
         )
     return benchmark, items
@@ -415,7 +418,7 @@ async def _process_item_async(
                 output=base_output,
                 status=base_result.status,
                 messages=base_result.messages,
-                metadata=dict(base_result.metadata),
+                metadata={**item.metadata, **dict(base_result.metadata)},
             )
         ]
 
@@ -441,6 +444,7 @@ async def _process_item_async(
 
             pert_metadata = dict(pert_result.metadata)
             pert_metadata.setdefault("perturbation", p_type)
+            pert_metadata = {**item.metadata, **pert_metadata}
 
             trajectories.append(
                 AgentTrajectory(
@@ -468,6 +472,7 @@ async def _process_item_async(
             base_prompt=item.prompt,
             base_output=base_output,
             perturbed_outputs=perturbed_outputs,
+            metadata=dict(item.metadata),
             accuracy=None,
             consistency=None,
         )
@@ -513,6 +518,7 @@ async def evaluate_async(
             base_prompt=example_result.base_prompt,
             base_output=example_result.base_output,
             perturbed_outputs=example_result.perturbed_outputs,
+            metadata=dict(example_result.metadata),
             **item_score,
         )
 
@@ -565,6 +571,8 @@ def _save_incremental_results(
                 "base_prompt": ex.base_prompt,
                 "base_output": ex.base_output,
                 "perturbed_outputs": ex.perturbed_outputs,
+                "is_perturbed": bool(ex.metadata.get("is_perturbed", False)),
+                "metadata": ex.metadata,
                 **{k: v for k, v in {
                     "consistency": ex.consistency,
                     "accuracy": ex.accuracy,
@@ -687,6 +695,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "base_prompt": ex.base_prompt,
                 "base_output": ex.base_output,
                 "perturbed_outputs": ex.perturbed_outputs,
+                "is_perturbed": bool(ex.metadata.get("is_perturbed", False)),
+                "metadata": ex.metadata,
                 **{
                     k: v
                     for k, v in {

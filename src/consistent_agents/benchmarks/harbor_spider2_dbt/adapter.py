@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from .duckdb_perturb import perturb_duckdb
+
 
 class Spider2DBTAdapter:
     """
@@ -332,6 +334,55 @@ class Spider2DBTAdapter:
         self._prepare_task_directory(task_id, local_task_id, eval_config)
 
         return local_task_id
+
+    def perturb_task_input_db(
+        self,
+        task_dir: str | Path,
+        *,
+        task_id: str,
+        spec: Dict[str, Any],
+        seed: int,
+    ) -> Path:
+        """
+        Perturb the task's *input* DuckDB file inside an already-materialized Harbor task directory.
+
+        This perturbs the expected `*.duckdb` in `environment/dbt_project/` in-place, preserving the
+        original filename so dbt wiring remains unchanged. It does NOT touch `/tests/gold.duckdb` or
+        `/solution/gold.duckdb`.
+
+        Returns:
+            Path to the perturbed DuckDB file.
+        """
+        task_dir = Path(task_dir)
+        config_path = task_dir / "tests" / "config.json"
+        if not config_path.is_file():
+            raise FileNotFoundError(f"Expected test config not found: {config_path}")
+
+        cfg = json.loads(config_path.read_text(encoding="utf-8"))
+        result_db = str(cfg.get("result_db") or "")
+        db_name = Path(result_db).name if result_db else ""
+
+        dbt_project_dir = task_dir / "environment" / "dbt_project"
+        if not dbt_project_dir.is_dir():
+            raise FileNotFoundError(f"Expected dbt_project dir not found: {dbt_project_dir}")
+
+        db_path = dbt_project_dir / db_name if db_name else None
+        if db_path is None or not db_path.is_file():
+            # Fallback: first *.duckdb in dbt_project
+            duckdb_files = sorted(dbt_project_dir.glob("*.duckdb"))
+            if not duckdb_files:
+                raise FileNotFoundError(
+                    f"No DuckDB file found under {dbt_project_dir} for task_id={task_id}"
+                )
+            db_path = duckdb_files[0]
+
+        print(f"[dbpert] starting perturbation for task_id={task_id} db={db_path}", flush=True)
+        result = perturb_duckdb(db_path, spec=spec, seed=int(seed))
+        print(
+            f"[dbpert] completed perturbation for task_id={task_id} manifest={result.manifest_path}",
+            flush=True,
+        )
+        return db_path
 
     def get_all_task_ids(self) -> List[str]:
         """
