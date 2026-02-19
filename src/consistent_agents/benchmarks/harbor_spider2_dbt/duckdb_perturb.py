@@ -4,9 +4,10 @@ import json
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import duckdb
+from word2word import Word2word
 
 _ALTERNATE_TIMESTAMP_FORMATS = [
     "%d/%m/%Y %H:%M:%S",
@@ -26,6 +27,9 @@ class DuckDBPerturbationResult:
 class PerturbContext:
     timestamp_format: str
     rng: random.Random
+    translate_probability: float
+    translators: Dict[str, Optional[Word2word]]
+    translation_languages: List[str]
 
 
 @dataclass
@@ -35,6 +39,7 @@ class ColumnPlan:
     expr: str
     alias: str
     ops: List[str] = field(default_factory=list)
+    translated_language: Optional[str] = None
 
 
 ColumnPerturbation = Callable[[ColumnPlan, PerturbContext], ColumnPlan]
@@ -120,6 +125,45 @@ def _perturb_header_shuffle(plan: ColumnPlan, ctx: PerturbContext) -> ColumnPlan
     return plan
 
 
+def _translate_token(token: str, translator: Optional[Word2word]) -> str:
+    if not token or translator is None:
+        return token
+    try:
+        candidates = translator(token)
+    except Exception:
+        return token
+    if not candidates:
+        return token
+    return str(candidates[0]) if candidates[0] else token
+
+
+def _translate_header(name: str, translator: Optional[Word2word]) -> str:
+    if not name:
+        return name
+    if "_" not in name:
+        return _translate_token(name, translator)
+
+    translated_tokens = [
+        _translate_token(token, translator) if token else token
+        for token in name.split("_")
+    ]
+    return "_".join(translated_tokens)
+
+
+def _perturb_header_translate(plan: ColumnPlan, ctx: PerturbContext) -> ColumnPlan:
+    if ctx.rng.random() >= ctx.translate_probability:
+        return plan
+
+    language = ctx.rng.choice(ctx.translation_languages)
+    translator = ctx.translators.get(language)
+    translated_alias = _translate_header(plan.alias, translator)
+    if translated_alias != plan.alias:
+        plan.alias = translated_alias
+        plan.translated_language = language
+        plan.ops.append("header_translate")
+    return plan
+
+
 def _apply_column_perturbations(
     cols: List[Tuple[str, str]],
     *,
@@ -183,7 +227,7 @@ def perturb_duckdb(
     spec: Dict[str, Any],
     seed: int,
 ) -> DuckDBPerturbationResult:
-    """Apply composable timestamp-format + header-shuffle perturbations."""
+    """Apply timestamp-format, header-shuffle, and random-language header translation."""
     db_path = Path(db_path)
     if not db_path.is_file():
         raise FileNotFoundError(f"DuckDB file not found: {db_path}")
@@ -198,16 +242,49 @@ def perturb_duckdb(
         if configured_timestamp_format
         else rng.choice(_ALTERNATE_TIMESTAMP_FORMATS)
     )
+    configured_translate_probability = spec.get("translate_probability") or (
+        (spec.get("values") or {}).get("translate_probability")
+    )
+    translate_probability = (
+        float(configured_translate_probability)
+        if configured_translate_probability is not None
+        else 0.5
+    )
+    translate_probability = max(0.0, min(1.0, translate_probability))
 
-    ctx = PerturbContext(timestamp_format=timestamp_format, rng=rng)
+    translation_languages = ["fr", "zh", "ja", "es"]
+    word2word_lang_codes = {
+        "fr": "fr",
+        "zh": "zh_cn",
+        "ja": "ja",
+        "es": "es",
+    }
+    translators: Dict[str, Optional[Word2word]] = {}
+    for language in translation_languages:
+        code = word2word_lang_codes[language]
+        try:
+            translators[language] = Word2word("en", code)
+        except Exception:
+            translators[language] = None
+
+    ctx = PerturbContext(
+        timestamp_format=timestamp_format,
+        rng=rng,
+        translate_probability=translate_probability,
+        translators=translators,
+        translation_languages=translation_languages,
+    )
     perturbations: List[ColumnPerturbation] = [
         _perturb_timestamp_format,
         _perturb_header_shuffle,
+        _perturb_header_translate,
     ]
 
     manifest: Dict[str, Any] = {
         "name": name,
         "timestamp_format": timestamp_format,
+        "translate_probability": translate_probability,
+        "translation_languages": translation_languages,
         "tables": {},
     }
 
@@ -239,6 +316,12 @@ def perturb_duckdb(
 
             manifest["tables"][f"{schema}.{table}"] = {
                 "timestamp_columns": [p.old_name for p in plans if "timestamp_format" in p.ops],
+                "translated_columns": [p.old_name for p in plans if "header_translate" in p.ops],
+                "translated_column_languages": {
+                    p.old_name: p.translated_language
+                    for p in plans
+                    if "header_translate" in p.ops and p.translated_language is not None
+                },
                 "column_mapping": {
                     p.old_name: p.alias for p in plans if p.old_name != p.alias
                 },
