@@ -15,6 +15,9 @@ class BenchmarkItem:
     label: Optional[str] = None
     task_dir: Optional[Path] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    instance_id: Optional[str] = None
+    base_commit: Optional[str] = None
+    repo: Optional[str] = None
 
 
 @dataclass
