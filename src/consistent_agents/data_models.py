@@ -32,7 +32,7 @@ class ExampleResult:
     base_output: str
     base_prompt: str
     perturbed_outputs: List[Dict[str, Any]]
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: Optional[Dict[str, Any]] = field(default_factory=dict)
     consistency: Optional[List[Dict[str, Any]]] = None
     accuracy: Optional[float] = None
 

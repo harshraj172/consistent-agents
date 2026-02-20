@@ -141,8 +141,7 @@ def load_benchmark_from_config(bm_cfg: Dict[str, Any]) -> Tuple[BaseBenchmark, L
         item_id = ex.get("instance_id", ex_id)
         metadata = dict(ex.get("metadata") or {})
 
-        items.append(
-            BenchmarkItem(
+        item = BenchmarkItem(
                 id=str(item_id),
                 prompt=str(prompt),
                 label=str(label) if label is not None else None,
@@ -151,7 +150,6 @@ def load_benchmark_from_config(bm_cfg: Dict[str, Any]) -> Tuple[BaseBenchmark, L
                 metadata=metadata,
                 base_commit=ex.get("base_commit"),
             )
-        )
         if "instance_id" in ex:
             item.instance_id = ex["instance_id"]
         if "base_commit" in ex:
