@@ -462,7 +462,7 @@ async def _process_item_async(
             perturb_fns,
             n=config.n_perturbations,
             seed=config.seed,
-            instance_id=instance_id,
+q            instance_id=instance_id,
         )
         perturbed_outputs: List[Dict[str, Any]] = []
         pert_output_strs: List[str] = []
