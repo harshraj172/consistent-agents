@@ -459,7 +459,7 @@ async def _process_item_async(
 
         perts = generate_perturbations(
             item.prompt,
-            perturb_entries,
+            perturb_fns,
             n=config.n_perturbations,
             seed=config.seed,
             instance_id=instance_id,
@@ -734,7 +734,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"Saving results incrementally to: {run_dir}")
 
     # Evaluate with incremental saving
-    result = evaluate(items, benchmark, eval_cfg, perturb_fns, harbor_cfg, run_dir, timestamp)
+    result = evaluate(items, benchmark, eval_cfg, perturb_entries, harbor_cfg, run_dir, timestamp)
 
     # Final save
     payload = {
