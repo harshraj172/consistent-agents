@@ -462,12 +462,21 @@ async def _process_item_async(
             perturb_fns,
             n=config.n_perturbations,
             seed=config.seed,
-q            instance_id=instance_id,
+            instance_id=getattr(item, 'instance_id', None),
         )
         perturbed_outputs: List[Dict[str, Any]] = []
         pert_output_strs: List[str] = []
 
-        for p_type, p_text in perts:
+        for p_type, p_text, p_inst in perts:
+            perturbation_kwargs = None
+            is_task_dir_perturbation = getattr(p_inst, 'modifies_task_dir', False)
+            if is_task_dir_perturbation:
+                perturbation_kwargs = {
+                    "instance_id": getattr(item, 'instance_id', None),
+                    "problem_statement": item.prompt,
+                    "repo": getattr(item, 'repo', None),
+                    "base_commit": getattr(item, 'base_commit', None),
+                }
             pert_result = await run_harbor_trial_async(
                 p_text,
                 harbor_cfg,
