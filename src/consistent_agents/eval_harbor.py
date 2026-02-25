@@ -455,15 +455,24 @@ async def _process_item_async(
 
         perts = generate_perturbations(
             item.prompt,
-            perturb_entries,
+            perturb_fns,
             n=config.n_perturbations,
             seed=config.seed,
-            instance_id=instance_id,
+            instance_id=getattr(item, 'instance_id', None),
         )
         perturbed_outputs: List[Dict[str, Any]] = []
         pert_output_strs: List[str] = []
 
-        for p_type, p_text in perts:
+        for p_type, p_text, p_inst in perts:
+            perturbation_kwargs = None
+            is_task_dir_perturbation = getattr(p_inst, 'modifies_task_dir', False)
+            if is_task_dir_perturbation:
+                perturbation_kwargs = {
+                    "instance_id": getattr(item, 'instance_id', None),
+                    "problem_statement": item.prompt,
+                    "repo": getattr(item, 'repo', None),
+                    "base_commit": getattr(item, 'base_commit', None),
+                }
             pert_result = await run_harbor_trial_async(
                 p_text,
                 harbor_cfg,
@@ -725,7 +734,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"Saving results incrementally to: {run_dir}")
 
     # Evaluate with incremental saving
-    result = evaluate(items, benchmark, eval_cfg, perturb_fns, harbor_cfg, run_dir, timestamp)
+    result = evaluate(items, benchmark, eval_cfg, perturb_entries, harbor_cfg, run_dir, timestamp)
 
     # Final save
     payload = {
