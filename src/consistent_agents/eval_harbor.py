@@ -655,15 +655,28 @@ def _save_incremental_results(
     result_path = run_dir / "result.json"
     result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
 
-    trajectory_payload = {
+    traj_dir = run_dir / "trajectories"
+    traj_dir.mkdir(exist_ok=True)
+    entry_files = []
+    for entry in trajectories:
+        entry_dict = asdict(entry)
+        filename = f"{entry.example_id}__{entry.variant}.json"
+        entry_files.append(filename)
+        (traj_dir / filename).write_text(
+            json.dumps(entry_dict, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+
+    trajectory_index = {
         "created_at": timestamp.isoformat(),
         "status": "in_progress",
+        "entries_dir": "trajectories/",
         "trajectory_count": len(trajectories),
-        "entries": [asdict(entry) for entry in trajectories],
+        "entry_files": entry_files,
     }
     trajectory_path = run_dir / "trajectory.json"
     trajectory_path.write_text(
-        json.dumps(trajectory_payload, ensure_ascii=False, indent=2, default=str),
+        json.dumps(trajectory_index, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
     )
 
@@ -788,16 +801,29 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
 
-        trajectory_payload = {
+        traj_dir = run_dir / "trajectories"
+        traj_dir.mkdir(exist_ok=True)
+        entry_files = []
+        for entry in result.trajectories:
+            entry_dict = asdict(entry)
+            filename = f"{entry.example_id}__{entry.variant}.json"
+            entry_files.append(filename)
+            (traj_dir / filename).write_text(
+                json.dumps(entry_dict, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+
+        trajectory_index = {
             "created_at": timestamp.isoformat(),
             "status": "completed",
             "results_dir": run_dir.name,
             "trajectory_file": trajectory_filename,
+            "entries_dir": "trajectories/",
             "trajectory_count": len(result.trajectories),
-            "entries": [asdict(entry) for entry in result.trajectories],
+            "entry_files": entry_files,
         }
         trajectory_path.write_text(
-            json.dumps(trajectory_payload, ensure_ascii=False, indent=2, default=str),
+            json.dumps(trajectory_index, ensure_ascii=False, indent=2, default=str),
             encoding="utf-8",
         )
 
