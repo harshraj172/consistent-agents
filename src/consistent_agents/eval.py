@@ -44,7 +44,20 @@ def load_benchmark_from_config(bm_cfg: Dict[str, Any]) -> Tuple[BaseBenchmark, L
         if prompt is None:
             continue
         label = ex.get("label") if isinstance(ex.get("label"), (str, int)) else None
-        items.append(BenchmarkItem(id=ex_id, prompt=str(prompt), label=str(label) if label is not None else None, env=ex["env"], base_commit=ex.get("base_commit", None)))
+    item_id = ex.get("instance_id", ex_id)
+    metadata = dict(ex.get("metadata") or {})
+
+    items.append(
+        BenchmarkItem(
+            id=str(item_id),
+            prompt=str(prompt),
+            label=str(label) if label is not None else None,
+            env=ex["env"],
+            metadata=metadata,
+            base_commit=ex.get("base_commit"),
+        )
+    )
+
     return benchmark, items
 
 # perturbation
@@ -168,6 +181,8 @@ def _save_incremental_results(
                 "base_prompt": ex.base_prompt,
                 "base_output": ex.base_output,
                 "perturbed_outputs": ex.perturbed_outputs,
+                "is_perturbed": bool(ex.metadata.get("is_perturbed", False)),
+                "metadata": ex.metadata,
                 **{k: v for k, v in {
                     "consistency": ex.consistency,
                     "accuracy": ex.accuracy,
@@ -220,7 +235,7 @@ def evaluate(
                     output=base_output,
                     status=base_result.status,
                     messages=base_result.messages,
-                    metadata=dict(base_result.metadata),
+                    metadata={**item.metadata, **dict(base_result.metadata)},
                 )
             )
         else:
@@ -243,6 +258,7 @@ def evaluate(
                 out = pert_result.output
                 pert_metadata = dict(pert_result.metadata)
                 pert_metadata.setdefault("perturbation", p_type)
+                pert_metadata = {**item.metadata, **pert_metadata}
                 if getattr(p_inst, 'modifies_code', False):
                     pert_metadata["code_modification"] = getattr(p_inst, 'last_result', {})
                 trajectories.append(
@@ -273,6 +289,7 @@ def evaluate(
                 base_prompt=item.prompt,
                 base_output=base_output,
                 perturbed_outputs=perturbed_outputs,
+                metadata=dict(item.metadata),
                 **item_score,
             )
         )
@@ -370,6 +387,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "base_prompt": ex.base_prompt,
                 "base_output": ex.base_output,
                 "perturbed_outputs": ex.perturbed_outputs,
+                "is_perturbed": bool(ex.metadata.get("is_perturbed", False)),
+                "metadata": ex.metadata,
                 **{k: v for k, v in {
                     "consistency": ex.consistency,
                     "accuracy": ex.accuracy,

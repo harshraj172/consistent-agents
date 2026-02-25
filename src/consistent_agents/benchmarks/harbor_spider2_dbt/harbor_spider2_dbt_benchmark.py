@@ -33,6 +33,9 @@ class HarborSpider2DBTBenchmark(BaseBenchmark):
         template_dir: str | Path | None = None,
         sample_tasks: int | float | None = None,
         overwrite: bool = False,
+        include_db_variants: bool = False,
+        db_perturb_seed: int = 42,
+        db_perturb_spec: Optional[Dict[str, Any]] = None,
         split: str = "all",
     ) -> None:
         super().__init__(split=split)
@@ -49,6 +52,11 @@ class HarborSpider2DBTBenchmark(BaseBenchmark):
         )
         self.sample_tasks = sample_tasks
         self.overwrite = bool(overwrite)
+        self.include_db_variants = bool(include_db_variants)
+        self.db_perturb_seed = int(db_perturb_seed)
+        self.db_perturb_spec = dict(
+            db_perturb_spec or {"name": "timestamp_header_perturb"}
+        )
 
         self._all_ids: List[str] = []
         self._id_to_index: Dict[str, int] = {}
@@ -103,28 +111,53 @@ class HarborSpider2DBTBenchmark(BaseBenchmark):
             spider2_dbt_root=spider2_dbt_root,
         )
 
-        all_ids = adapter.get_all_task_ids()
-        self._all_ids = self._sample_task_ids(all_ids)
+        source_ids = self._sample_task_ids(adapter.get_all_task_ids())
+        prepared_rows: List[Dict[str, Any]] = []
+
+        for source_task_id in source_ids:
+            if self.include_db_variants:
+                variants = [
+                    (source_task_id, False),
+                    (f"{source_task_id}_perturbed", True),
+                ]
+            else:
+                variants = [(source_task_id, False)]
+
+            for local_task_id, should_perturb in variants:
+                task_dir = self.tasks_root / local_task_id
+                if self.overwrite and task_dir.exists():
+                    shutil.rmtree(task_dir, ignore_errors=True)
+
+                if not task_dir.exists():
+                    adapter.generate_task(source_task_id, local_task_id=local_task_id)
+
+                if should_perturb:
+                    adapter.perturb_task_input_db(
+                        task_dir=task_dir,
+                        task_id=source_task_id,
+                        spec=self.db_perturb_spec,
+                        seed=self.db_perturb_seed,
+                    )
+
+                instruction_path = task_dir / "instruction.md"
+                prompt = instruction_path.read_text(encoding="utf-8").strip()
+                prepared_rows.append(
+                    {
+                        "instance_id": local_task_id,
+                        "source_instance_id": source_task_id,
+                        "task_dir": task_dir,
+                        "prompt": prompt,
+                        "label": None,
+                        "metadata": {
+                            "is_perturbed": should_perturb,
+                            "source_instance_id": source_task_id,
+                        },
+                    }
+                )
+
+        self._all_ids = [row["instance_id"] for row in prepared_rows]
         self._id_to_index = {tid: idx for idx, tid in enumerate(self._all_ids)}
-
-        for idx, task_id in enumerate(self._all_ids):
-            task_dir = self.tasks_root / task_id
-            if self.overwrite and task_dir.exists():
-                shutil.rmtree(task_dir, ignore_errors=True)
-
-            if not task_dir.exists():
-                adapter.generate_task(task_id, local_task_id=task_id)
-
-            instruction_path = task_dir / "instruction.md"
-            prompt = instruction_path.read_text(encoding="utf-8").strip()
-
-            state = {
-                "instance_id": task_id,
-                "task_dir": task_dir,
-                "prompt": prompt,
-                "label": None,
-            }
-            self._prepared[idx] = state
+        self._prepared = {idx: row for idx, row in enumerate(prepared_rows)}
 
     def __iter__(self) -> Iterator[Dict[str, Any]]:
         if not self._prepared:
@@ -139,6 +172,7 @@ class HarborSpider2DBTBenchmark(BaseBenchmark):
                 "env": env,
                 "label": state.get("label"),
                 "task_dir": state["task_dir"],
+                "metadata": dict(state.get("metadata") or {}),
             }
 
     def score(self, idx: int, base_output: str, predictions: List[Any]) -> Dict[str, float]:

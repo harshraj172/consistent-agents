@@ -9,11 +9,12 @@ from consistent_agents.environments import BaseEnvironment
 
 @dataclass
 class BenchmarkItem:
-    id: str
+    id: str | int
     prompt: str
     env: BaseEnvironment
     label: Optional[str] = None
     task_dir: Optional[Path] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
     instance_id: Optional[str] = None
     base_commit: Optional[str] = None
     repo: Optional[str] = None
@@ -31,6 +32,7 @@ class ExampleResult:
     base_output: str
     base_prompt: str
     perturbed_outputs: List[Dict[str, Any]]
+    metadata: Optional[Dict[str, Any]] = field(default_factory=dict)
     consistency: Optional[List[Dict[str, Any]]] = None
     accuracy: Optional[float] = None
 
