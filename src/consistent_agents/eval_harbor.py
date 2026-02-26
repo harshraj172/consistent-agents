@@ -368,6 +368,10 @@ async def run_harbor_trial_async(
         "trials_dir": str(harbor_cfg.trials_dir),
     }
 
+    actual_instruction_path = task_dir / harbor_cfg.task.instruction_file
+    if actual_instruction_path.is_file():
+        metadata["instruction_prompt"] = actual_instruction_path.read_text(encoding="utf-8")
+
     try:
         trial = Trial(trial_config)
         trial_result = await trial.run()
@@ -496,7 +500,7 @@ async def _process_item_async(
             if is_task_dir_perturbation:
                 task_mod = getattr(p_inst, 'last_result', {})
                 pert_metadata["task_dir_modification"] = task_mod
-
+                pert_metadata["is_perturbed"] = True
                 if task_mod.get("rename"):
                     old_name, new_name = task_mod["rename"]
                     pert_metadata["variable_renamed"] = {
@@ -519,7 +523,7 @@ async def _process_item_async(
                 AgentTrajectory(
                     example_id=item.id,
                     variant="perturbation",
-                    prompt=p_text,
+                    prompt=pert_metadata.get("instruction_prompt", p_text),
                     output=pert_output,
                     status=pert_result.status,
                     messages=pert_result.messages,
@@ -530,7 +534,7 @@ async def _process_item_async(
             perturbed_outputs.append(
                 {
                     "type": p_type,
-                    "prompt": p_text,
+                    "prompt": pert_metadata.get("instruction_prompt", p_text),
                     "output": pert_output,
                 }
             )
@@ -640,7 +644,7 @@ def _save_incremental_results(
                 "base_prompt": ex.base_prompt,
                 "base_output": ex.base_output,
                 "perturbed_outputs": ex.perturbed_outputs,
-                "is_perturbed": bool(ex.metadata.get("is_perturbed", False)),
+                "is_perturbed": bool(ex.metadata.get("is_perturbed", False)) or bool(ex.perturbed_outputs),
                 "metadata": ex.metadata,
                 **{k: v for k, v in {
                     "consistency": ex.consistency,
@@ -777,7 +781,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "base_prompt": ex.base_prompt,
                 "base_output": ex.base_output,
                 "perturbed_outputs": ex.perturbed_outputs,
-                "is_perturbed": bool(ex.metadata.get("is_perturbed", False)),
+                "is_perturbed": bool(ex.metadata.get("is_perturbed", False)) or bool(ex.perturbed_outputs),
                 "metadata": ex.metadata,
                 **{
                     k: v
