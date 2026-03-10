@@ -22,3 +22,9 @@ python -m src.consistent_agents.eval_harbor src/consistent_agents/config/harbor-
 
 python -m src.consistent_agents.eval_harbor src/consistent_agents/config/harbor-swebench-codex.yaml
 ``` 
+
+### Trajectory metrics
+Compute `trajectory_metrics.json` for a single run directory (must contain `trajectory.json` and `result.json`):
+```bash
+python src/consistent_agents/trajectory_metrics.py outputs/<run_dir>
+```
