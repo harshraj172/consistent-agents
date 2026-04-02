@@ -60,6 +60,8 @@ class HarborBFCLBenchmark(BaseBenchmark):
 
         self.item_scores: Dict[str, float] = {}
         self.total_scores: Dict[str, int] = {"success": 0, "total": 0}
+        self._item_consistency: Optional[float] = None
+        self._consistency_scores: List[float] = []
 
     def load(self) -> None:
         """Load the BFCL benchmark data and prepare Harbor tasks."""
@@ -137,13 +139,23 @@ class HarborBFCLBenchmark(BaseBenchmark):
         self.item_scores = {"success": success_count, "total": total}
         self.total_scores["success"] += success_count
         self.total_scores["total"] += total
+
+        # Compute consistency: 1.0 if all runs agree (all pass or all fail), 0.0 otherwise
+        if predictions:
+            results = [_is_success(o) for o in outputs]
+            consistent = 1.0 if len(set(results)) == 1 else 0.0
+            self._item_consistency = consistent
+            self._consistency_scores.append(consistent)
+        else:
+            self._item_consistency = None
+
         return self.item_score()
 
     def item_score(self) -> Dict[str, float]:
         accuracy = self.item_scores["success"] / self.item_scores["total"]
         return {
             "accuracy": accuracy,
-            "consistency": None,
+            "consistency": self._item_consistency,
         }
 
     def total_score(self) -> Dict[str, float]:
@@ -151,9 +163,12 @@ class HarborBFCLBenchmark(BaseBenchmark):
             return {"accuracy": 0.0, "consistency": None, "total": 0}
 
         accuracy = self.total_scores["success"] / self.total_scores["total"]
+        consistency = None
+        if self._consistency_scores:
+            consistency = sum(self._consistency_scores) / len(self._consistency_scores)
         return {
             "accuracy": accuracy,
-            "consistency": None,
+            "consistency": consistency,
             "total": self.total_scores["total"],
         }
 

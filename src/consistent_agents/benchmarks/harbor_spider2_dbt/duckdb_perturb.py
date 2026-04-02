@@ -274,11 +274,16 @@ def perturb_duckdb(
         translators=translators,
         translation_languages=translation_languages,
     )
-    perturbations: List[ColumnPerturbation] = [
-        _perturb_timestamp_format,
-        _perturb_header_shuffle,
-        _perturb_header_translate,
-    ]
+    _all_perturbations: Dict[str, ColumnPerturbation] = {
+        "timestamp_format": _perturb_timestamp_format,
+        "header_shuffle": _perturb_header_shuffle,
+        "header_translate": _perturb_header_translate,
+    }
+    requested = spec.get("perturbation_types")
+    if requested:
+        perturbations = [_all_perturbations[k] for k in requested if k in _all_perturbations]
+    else:
+        perturbations = list(_all_perturbations.values())
 
     manifest: Dict[str, Any] = {
         "name": name,

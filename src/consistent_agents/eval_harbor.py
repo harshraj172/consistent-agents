@@ -713,8 +713,35 @@ def _load_config(config_path: str | Path) -> Dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
+def _load_completed_ids(resume_dir: Path) -> set:
+    """Load IDs of already-completed examples from a previous run's result.json."""
+    result_path = resume_dir / "result.json"
+    if not result_path.exists():
+        print(f"No result.json found in {resume_dir}, starting fresh")
+        return set()
+    with open(result_path, "r") as f:
+        data = json.load(f)
+    completed = set()
+    for ex in data.get("examples", []):
+        completed.add(ex["id"])
+    print(f"Resuming: skipping {len(completed)} already-completed examples")
+    return completed
+
+
 def main(argv: Optional[List[str]] = None) -> int:
-    cfg_path = Path(argv[0]) if argv else Path("config.yaml")
+    # Parse --resume flag
+    args = list(argv) if argv else sys.argv[1:]
+    resume_dir = None
+    if "--resume" in args:
+        idx = args.index("--resume")
+        if idx + 1 < len(args):
+            resume_dir = Path(args[idx + 1])
+            args = args[:idx] + args[idx + 2:]
+        else:
+            print("--resume requires a path to a previous run directory")
+            return 1
+
+    cfg_path = Path(args[0]) if args else Path("config.yaml")
     raw_cfg = _load_config(cfg_path)
     n_perturbations = int(raw_cfg.get("eval", {}).get("n_perturbations", 5))
     eval_cfg = EvalConfig(
@@ -737,12 +764,40 @@ def main(argv: Optional[List[str]] = None) -> int:
         name = cfg.get("name") or cfg.get("path") or "perturbation"
         perturb_entries.append((inst, name))
 
+    # Resume: load completed IDs and pre-populate examples
+    completed_ids: set = set()
+    resumed_examples: List[ExampleResult] = []
+    if resume_dir is not None:
+        completed_ids = _load_completed_ids(resume_dir)
+        # Load previous examples to merge later
+        result_path = resume_dir / "result.json"
+        if result_path.exists():
+            with open(result_path, "r") as f:
+                prev_data = json.load(f)
+            for ex in prev_data.get("examples", []):
+                resumed_examples.append(ExampleResult(
+                    id=ex["id"],
+                    base_prompt=ex.get("base_prompt", ""),
+                    base_output=ex.get("base_output", ""),
+                    perturbed_outputs=ex.get("perturbed_outputs", []),
+                    metadata=ex.get("metadata", {}),
+                    consistency=ex.get("consistency"),
+                    accuracy=ex.get("accuracy"),
+                ))
+        # Filter out completed items
+        items = [it for it in items if it.id not in completed_ids]
+        print(f"Remaining items to evaluate: {len(items)}")
+
     # Setup output directory early for incremental saves
     out_path_str = raw_cfg.get("output", {}).get("path") or raw_cfg.get("out")
     run_dir = None
     timestamp = datetime.now()
 
-    if out_path_str:
+    if resume_dir is not None:
+        # Reuse the resume directory
+        run_dir = resume_dir
+        print(f"Resuming into: {run_dir}")
+    elif out_path_str:
         base_out = Path(out_path_str)
         if base_out.suffix:
             base_dir = base_out.parent
@@ -761,6 +816,18 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Evaluate with incremental saving
     result = evaluate(items, benchmark, eval_cfg, perturb_entries, harbor_cfg, run_dir, timestamp)
+
+    # Merge resumed examples with new results
+    if resumed_examples:
+        all_examples = resumed_examples + result.examples
+        result = EvalResult(
+            config=result.config,
+            total=len(all_examples),
+            accuracy=result.accuracy,
+            consistency=result.consistency,
+            examples=all_examples,
+            trajectories=result.trajectories,
+        )
 
     # Final save
     payload = {

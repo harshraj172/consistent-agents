@@ -1,0 +1,875 @@
+\documentclass{article}
+\usepackage[preprint]{neurips_2025}
+
+% Language setting
+% Replace `english' with e.g. `spanish' to change the document language
+\usepackage[english]{babel}
+
+% Set page size and margins
+% Replace `letterpaper' with `a4paper' for UK/EU standard size
+% \usepackage[letterpaper,top=2cm,bottom=2cm,left=3cm,right=3cm,marginparwidth=1.75cm]{geometry}
+
+% Useful packages
+\usepackage{amsmath,amsthm,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage[colorlinks=true, allcolors=blue]{hyperref}
+\usepackage{xcolor}
+\newcommand{\ag}[1]{\textcolor{red}{Aritra: #1}}
+\newcommand{\red}[1]{\textcolor{red}}
+\newcommand{\sm}[1]{\textcolor{blue}{Subho: #1}}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% THEOREMS
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{assumption}[theorem]{Assumption}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+\newtheorem{example}[theorem]{Example}
+
+% \title{A Statistical Framework for Measuring\\Consistency in AI Agents}
+% \title{Agentic Consistency: A Stochastic Process Framework}
+\title{Consistency as a Testable Property:\\
+Statistical Methods to Evaluate AI Agent Reliability}
+\author{Harsh, Niranjan, Suvro, Aritra, Cheryl, Subho}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+The ability of AI agents to behave consistently under similar but noisy operational conditions is critical to their operational success. In this paper, we introduce a statistical framework for measuring and testing consistency in AI agents along two dimensions: observable reliability (output-level consistency) and internal reliability (trajectory-level stability of beliefs, plans, and actions). Treating an agent's execution trajectory as a stochastic process, we formalize both dimensions as testable hypotheses using U-statistic theory. For observable reliability, we %distinguish between output randomness (intrinsic sampling stochasticity) and input sensitivity (robustness to semantic perturbations), developing 
+develop asymptotic hypothesis tests with provable size and power guarantees. For internal reliability, we extend this method to partially observable Markov decision processes (POMDPs) to measure consistency across belief states, plan adherence, and action sequences throughout multi-step execution. We evaluate our framework on three diverse agentic benchmarks, applying prompt-level and task-level perturbations to each benchmark then applying our testing methodology. Our findings reveal significant consistency gaps in state-of-the-art agents, with consistency and accuracy dropping by up to {\red XX}\% under semantically preserving input transformations. %The decomposition into output randomness versus input sensitivity provides actionable insights: agents may be deterministic yet brittle to paraphrasing, or robust to perturbations yet highly stochastic.
+\end{abstract}
+
+\section{Introduction}
+
+AI agents powered by large language models (LLMs) have demonstrated remarkable capabilities across diverse domains, from software engineering \cite{jimenez2024swebench} to complex reasoning tasks \cite{yao2023react}. As these agents are increasingly deployed in real-world applications, ensuring their consistent and reliable behavior across different contexts and input variations has proven challenging \cite{rabanser2026scienceaiagentreliability}. Unlike traditional software systems with deterministic behavior, LLM-based agents can exhibit significant output variance even when faced with semantically equivalent inputs.
+
+Agent evaluations represent a nascent but rapidly growing field, yet current evaluation methodologies lack standardized approaches for assessing behavioral consistency. While existing benchmarks measure task completion rates and accuracy on specific problems, they typically do not evaluate whether agents produce coherent, reliable outputs when faced with variations in input formulation, context, or execution environment. This gap is particularly concerning given the high-stakes domains where agents are being deployed, including healthcare, finance, and autonomous systems.
+
+The need for consistency measurement in AI agents is driven by several observed limitations.
+
+\begin{itemize}[leftmargin=*,nolistsep]
+    \item \textbf{Sensitivity to Input Perturbations} Recent studies have shown that even minor typographical errors or paraphrasing can cause significant accuracy drops in chain-of-thought reasoning \cite{gan2024r2ata, zhu2023promptrobust}. For instance, a single character edit can reduce model accuracy by more than 5 percentage points on mathematical reasoning tasks.
+    
+    \item \textbf{Tool Selection Fragility} Agents with access to multiple tools exhibit erratic behavior when tool descriptions are modified or when irrelevant tools are added to their environment, with certified accuracy dropping close to 0\% under adversarial conditions \cite{huang2024cats}.
+    
+    \item \textbf{Context-Dependent Inconsistencies} Agents often produce contradictory responses across conversation turns, particularly when dealing with context length limitations or when query details are underspecified.
+    
+    \item \textbf{Benchmark Saturation Without Reliability} While frontier models achieve approximately 70\% success rates on established benchmarks like SWE-bench, performance drops below {\red XX}\% on continuously updated variants like SWE-bench-Live, suggesting potential contamination and lack of true robustness.
+\end{itemize}
+
+
+\sm{TODO: add contribution}
+% To address these needs, this work makes the following key contributions:
+
+% \begin{enumerate}[nolistsep,leftmargin=*]
+%     \item We introduce the first systematic framework for measuring consistency in AI agents across multiple dimensions, including input perturbation robustness, argument set consistency, trace-level consistency, and memory-dependent consistency.
+    
+%     \item We provide a structured categorization of agent types based on cognitive architecture, search strategy, memory layout, and tool interfacing capabilities, enabling targeted consistency evaluation for different agent designs.
+    
+%     \item We develop a comprehensive set of perturbation techniques spanning noise-based, adversarial, and neutral variations, systematically designed to preserve semantic equivalence while testing robustness.
+    
+%     \item We conduct extensive experiments across 3-5 representative agentic benchmarks, revealing significant consistency gaps in current state-of-the-art agents and identifying which architectural choices contribute to improved consistency.
+    
+%     \item We release our framework as reusable code with integrated benchmarks, perturbation techniques, and evaluation metrics, enabling the research community to systematically assess and improve agent consistency.
+% \end{enumerate}
+
+% \subsection{Paper Organization}
+
+% The remainder of this paper is organized as follows: Section \ref{sec:related} reviews related work on LLM-based agents, evaluation methodologies, and consistency measurement approaches. Section \ref{sec:methodology} presents our consistency framework, including agent categorization, perturbation techniques, and evaluation metrics. Section \ref{sec:experiments} describes our experimental setup and results across multiple benchmarks and agent architectures. Section \ref{sec:discussion} discusses implications, limitations, and future directions. We conclude in Section \ref{sec:conclusion}.
+
+\section{Related Work}
+
+% \paragraph{LLM-Based Agents: Architectures and Capabilities}
+% Agents have evolved from simple prompt-response systems to sophisticated architectures capable of multi-step reasoning, tool use, and autonomous decision-making. Agent designs range from reactive condition-action mappings to model-based planners with explicit belief updating. Chain-of-Thought (CoT) agents \cite{wei2022chain} enhance reasoning by generating intermediate steps, while more advanced architectures like ReAct \cite{yao2023react} interleave reasoning with action execution. Agents employ various search mechanisms including sequential reasoning (CoT), Monte Carlo rollouts (tree search agents), and game-theoretic approaches. Tree-of-Thought methods explore multiple reasoning paths simultaneously, evaluating candidate solutions to identify optimal strategies. Memory mechanisms vary from simple context windows to sophisticated hierarchical systems. Approaches include conversation summarization, external read-write memory, and selective retention of past $N$ interactions. MemGPT exemplifies tiered memory architectures for handling long-context scenarios. Tool-calling capabilities range from static API integration to dynamic Python sandbox execution. Frameworks like Gorilla and ToolFormer specialize in function selection and parameter mapping, while coding agents like SWE-Agent structure interactions with complex execution environments.
+
+\paragraph{Agent Evaluation}
+Evaluation approaches for LLM-based agents span task-specific benchmarks and general capability assessments. Task-specific benchmarks measure agentic performance across diverse domains. SWE-bench \cite{jimenez2024swebench} provides real-world GitHub issues for testing software engineering capabilities, with SWE-bench Verified addressing solution leakage and test quality concerns. PlanBench and MINT assess planning in interactive domains, revealing struggles with long-horizon tasks. AgentBoard introduces Progress Rate metrics for trajectory comparison against expected plans. $\tau$-Bench evaluates tool-agent-user interaction using strict pass@k metrics requiring success across all $k$ attempts. The Berkeley Function Calling Leaderboard (BFCL) \cite{patil2024bfcl} continuously assesses function-calling accuracy with evolving test sets. TerminalBench \cite{wang2024terminalbench} evaluates command-line agents on realistic system administration tasks. Harbor \cite{harbor2024} provides infrastructure for containerized agent execution with verifiable task environments. Frameworks like MetaGPT \cite{hong2023metagpt} and ChatDev \cite{qian2023chatdev} demonstrate multi-agent collaboration architectures, though their evaluation focuses on capability rather than consistency. Big-Bench Hard (BBH) and T-Eval exemplify general capability assessments, stress-testing multi-step reasoning and tool utilization across diverse tasks.
+% \textbf{Enterprise and Production Evaluation:} Commercial platforms like LangSmith enable continuous testing on production data, emphasizing real-world edge cases, prompt injection robustness, and auditability over static benchmark performance.
+
+\paragraph{Consistency in Language Models}
+Recent work has explored consistency and robustness in LLMs, primarily for single-turn outputs. Novikova et al. \cite{novikova2025consistencylanguagemodelscurrent} surveyed consistency measurement approaches to identify open challenges, including in extending these methods to agentic scenarios. PromptRobust \cite{zhu2023promptrobust} demonstrates that semantically equivalent rewordings can flip model outputs, revealing fragility in prompt interpretation. The R²ATA benchmark \cite{gan2024r2ata} introduces adversarial typographical attacks, showing that single character edits cascade through chain-of-thought reasoning, reducing accuracy by over 5 percentage points.
+
+Raj et al \cite{raj2023measuringreliabilitylargelanguage} developed semantic consistency metrics for comparing outputs under equivalent inputs using entailment and embedding-based similarity. However, these approaches focus on final outputs rather than multi-step agent trajectories. ToolEmu \cite{ruan2024toolemu} reveals that even safe agents fail approximately 24\% of high-stakes tool-use cases under adversarial conditions. The CATS certification framework \cite{huang2024cats} demonstrates that adversarially modifying available tools can reduce certified accuracy to near zero, highlighting extreme fragility in tool selection.
+%Studies on response consistency with shared context suggest that agents struggle with context length limitations and frequent topic switching, leading to contradictory statements across conversation turns. Research on underspecification shows that when prompt requirements are implicit, LLMs produce highly variable outcomes as they arbitrarily fill missing details.
+
+\paragraph{Agent Reliability}
+Most closely related to our work, Rabanser et al. \cite{rabanser2026scienceaiagentreliability} introduced twelve metrics decomposing the reliability of agent outputs along four dimensions: consistency, robustness, predictability, and safety. Their evaluation of 14 models on two benchmarks reveals that agentic capability gains have yielded only modest reliability improvements.
+
+\vspace{1em}
+Notwithstanding the progress, existing work does not provide an overarching framework or reusable code to evaluate consistency in agent architectures, task types, and perturbation categories. Current perturbation approaches are broad and not specific to the task being evaluated. Existing consistency metrics focus on final outputs rather than analyzing consistency at the level of agent execution traces, missing opportunities to identify where and why agents deviate. We address these gaps by providing the foundational theory of measuring reliability in AI agents, by framing consistency as a testable hypothesis. To this end, we use the statistical notion of U-statistics \cite{lee1990ustatistics} and cover the observable reliability (output-level) and internal (trace-level) in our measurement framework.
+
+\ag{Key way to make our paper different from Science of Agentic reliability paper: focus on internal reliability rather than observable reliabiity?}
+
+\section{Characterizing and Testing for Consistency}
+
+Consider an AI agent that receives a base prompt $x_0$ and produces an initial response $y_0$. To evaluate consistency, we generate semantically equivalent or perturbed variants of the prompt: $x_1, x_2, \ldots, x_n$ where each $x_i$ is either identical to $x_0$ or a semantically equivalent perturbation. For each prompt variant $x_i$, the agent produces an output $y_i$. Let $P(Y|X=x)$ denote the probability distribution of the agent's output given context $X = x$. Under the assumption of independent sampling (conditional on the prompts), the outputs are independent, with $y_i \sim P(Y | X=x_i) $. In the special case where all prompts are identical ($x_i = x_0$ for all $i$), the outputs are i.i.d.: $y_i \overset{\text{i.i.d.}}{\sim} P(Y | X=x_0)$.
+
+For any measurable functional $\phi(\cdot)$ that maps an output $y$ to a real value (e.g., sequence length, semantic embedding, or log-probability), consistency implies that the distribution of these functionals must be concentrated. Specifically, the expected pairwise difference across samples must remain negligible:
+\begin{equation}
+    \mathbb E [\|\phi(y_i)-\phi(y_j)\| \mid X = x_0] < \epsilon, \quad \forall i, j.
+\end{equation}
+
+By the Strong Law of Large Numbers, the empirical mean of the functional across $n$ samples must also converge to the true expected value as the number of samples increases:
+\begin{equation}
+    \frac{1}{n} \sum_{i=1}^n \phi(y_i) \xrightarrow{\text{a.s.}} \mathbb E _{P(Y|x_0)}[\phi(Y)].
+\end{equation}
+
+Thus, the measurement of inconsistency can be seen as the estimation of the variance $\mathbb V (\phi(Y) \mid X=x_0)$, or the deviation of individual samples from the expected functional value.
+
+\subsection{Consistency Metric as a U-Statistic}
+
+Building on the semantic consistency metric proposed by \cite{raj2023measuringreliabilitylargelanguage}, we formalize consistency measurement through U-statistics, which provides a natural framework for symmetric functionals of i.i.d. samples \cite{lee1990ustatistics}. Let $\mathcal{Y}$ denote the output space. Define a symmetric kernel function $k: \mathcal{Y} \times \mathcal{Y} \rightarrow \mathbb{R}$ that measures similarity between pairs of outputs. Common choices include metrics based on token matching, such as BLEU and ROUGE \cite{elazar_measuring_2021}, entailment, contradiction, and LLM-based judges~\cite{raj2023measuringreliabilitylargelanguage}, and cosine similarity \cite{rabinovich-etal-2023-predicting}. We assume the kernel is normalized such that $k(y, y) = 1$ for all $y \in \mathcal{Y}$, and $k(y, y') \in [0, 1]$ for all pairs $(y, y')$. This assumption holds for cosine similarity, normalized Gaussian kernels, and normalized semantic similarity metrics. %For kernels not naturally normalized (e.g., edit distance), appropriate normalization can be applied.
+
+Under this setup, we define the following statistic 
+%
+\begin{equation}
+    U_n = \binom{n+1}{2}^{-1} \sum_{0 \leq i < j \leq n} k(y_i, y_j).
+    \label{eq:u_statistic}
+\end{equation}
+%
+This is a U-statistic, which is an unbiased estimator of the population parameter \cite{lee1990ustatistics}:
+\begin{equation}
+    \theta = \mathbb E_{Y, Y' \sim P(\cdot|X=x_0)}[k(Y, Y')] = \iint k(y, y') \, dP(y|x_0) \, dP(y'|x_0).
+    \label{eq:theta}
+\end{equation}
+
+Note that this is exactly the semantic consistency metric in \cite{raj2023measuringreliabilitylargelanguage}, assuming a single base prompt. The interpretation of $\theta$ depends on the kernel choice. For exact match kernels where $k(y, y') = \mathbb{I}[y = y']$, perfect consistency ($\theta = 1$) requires all outputs to be identical. For semantic kernels based on embeddings, entailment, or LLM judges, perfect consistency ($\theta = 1$) occurs when $k(y, y') = 1$ for all output pairs, allowing for paraphrases or semantically equivalent responses that differ syntactically.
+
+\subsection{Consistency Under Invariant Output Distributions}
+% \subsection{Multi-Sample Consistency Framework}
+
+In practice, we evaluate consistency across multiple independent base instances drawn from a benchmark. For each base prompt $x_0^m$ with response $y_0^m$, $m \in \{1, \ldots, M\}$, we generate $n$ perturbed variants and collect outputs, yielding an instance-specific U-statistic $U_n^m$. The aggregate consistency measure averages across instances.
+
+Following \eqref{eq:u_statistic}, we define instance-specific U-statistics $U_n^m = \binom{n+1}{2}^{-1} \sum_{0 \leq i < j \leq n} k(y_i^m, y_j^m) $, estimating $ \theta_m = \mathbb E_{Y, Y' \sim P_m}[k(Y, Y')] $. Averaging across the base prompts, we get the aggregate consistency measure of \cite{raj2023measuringreliabilitylargelanguage}:
+%
+\begin{equation}
+    \bar{U}_{M,n} = \frac{1}{M} \sum_{m=1}^M U_n^m.
+    \label{eq:avg_ustat}
+\end{equation}
+%
+This estimates the average consistency across instances: $ \bar{\theta} = \frac{1}{M} \sum_{m=1}^M \theta_m = \mathbb E_m[\theta_m] $, where the expectation is over the instance distribution.
+
+For the results that follow, we make the following assumptions
+\begin{assumption}[Distributional Invariance]
+\label{assum:invariance}
+For each instance $m$, the conditional output distribution remains unchanged across perturbed variants:
+\begin{equation}
+    P(Y|X=x_i^m) = P(Y|X=x_0^m) =: P_m(Y) \quad \forall i \in \{1, \ldots, n\}
+    \label{eq:invariance}
+\end{equation}
+so that outputs within instance $m$ are i.i.d.: $y_0^m, y_1^m, \ldots, y_n^m \overset{\text{i.i.d.}}{\sim} P_m(Y)$.
+\end{assumption}
+
+\begin{assumption}[Homogeneous Task Distribution]
+\label{assum:homogeneous}
+All instances are drawn from the same task distribution, so $\theta_m = \theta$ for all $m$. This implies $\bar{\theta} = \theta$ and $\mathbb V_m[\theta_m] = 0$.
+\end{assumption}
+
+Assumption \ref{assum:invariance} states that perturbations preserve the semantic content of the task: whether we sample multiple outputs from the same prompt ($x_i^m = x_0^m$) or from semantically equivalent paraphrases ($x_i^m \sim \mathcal{P}(x_0^m)$), the distribution of desired outputs remains unchanged. Assumption \ref{assum:homogeneous} reflects the typical benchmark setting where all instances are drawn from a common task distribution (e.g., all GitHub issues in SWE-bench, all SQL queries in Spider2). While individual instances differ in content, they share a common expected consistency level $\theta$ characteristic of the task type. %Under this assumption, variation in $U_n^m$ arises solely from sampling noise within instances, not from heterogeneity across instances. This enables us to pool information across the benchmark to obtain a more precise estimate of the agent's consistency on the task distribution.
+
+\begin{theorem}[Asymptotic Normality Under Homogeneity]
+\label{thm:homogeneous}
+Under Assumptions \ref{assum:invariance} and \ref{assum:homogeneous}, define $k_1(y) = \mathbb E_{Y' \sim P}[k(y, Y')] - \theta$ and $\zeta_1^2 = \mathbb V(k_1(Y))$. If $\mathbb E[k(Y, Y')^2] < \infty$ and $\zeta_1^2 > 0$, then as $M \to \infty$ with $n$ fixed:
+\begin{equation}
+    \sqrt{M}(\bar{U}_{M,n} - \theta) \xrightarrow{d} \mathcal{N}\left(0, \frac{4\zeta_1^2}{n+1}\right)
+\end{equation}
+\end{theorem}
+
+% \begin{proof}
+% Under Assumption \ref{assum:homogeneous}, all $U_n^m$ are i.i.d. with $\mathbb E[U_n^m] = \theta$. By the Hoeffding decomposition for each instance:
+% \begin{equation}
+%     U_n^m - \theta = \frac{2}{n+1}\sum_{i=0}^n k_1(y_i^m) + R_n^m
+% \end{equation}
+% where $R_n^m = o_p((n+1)^{-1/2})$. Under Assumption \ref{assum:invariance}, outputs within instance $m$ are i.i.d., so:
+% \begin{equation}
+%     \mathbb V[U_n^m] = \frac{4\zeta_1^2}{n+1} + o(n^{-1})
+% \end{equation}
+
+% By the Central Limit Theorem for i.i.d. random variables:
+% \begin{equation}
+%     \sqrt{M}(\bar{U}_{M,n} - \theta) = \frac{1}{\sqrt{M}}\sum_{m=1}^M (U_n^m - \theta) \xrightarrow{d} \mathcal{N}\left(0, \frac{4\zeta_1^2}{n+1}\right)
+% \end{equation}
+% \end{proof}
+
+We estimate the variance parameter using the sample variance across instances:
+\begin{equation}
+    \hat{\sigma}_U^2 = \frac{1}{M-1}\sum_{m=1}^M \left(U_n^m - \bar{U}_{M,n}\right)^2.
+    \label{eq:variance_est_homo}
+\end{equation}
+
+Under Assumption \ref{assum:homogeneous}, this consistently estimates $(n+1)^{-1} 4\zeta_1^2$ as $M \to \infty$.
+
+To ascertain aggregate output consistency, we test the following null and alternate hypotheses:
+\begin{align}
+    H_0&: \theta = 1 \quad\text{(perfect consistency)} \qquad \text{vs.} \qquad
+    H_1&: \theta < 1 \quad\text{(inconsistency)}.
+\end{align}
+%
+Using the estimates in \eqref{eq:avg_ustat} and \eqref{eq:variance_est_homo}, our test statistic is
+%
+\begin{equation}
+    T_{M,n} = \frac{\sqrt{M}(\bar{U}_{M,n} - 1)}{\hat{\sigma}_U}.
+    \label{eq:test_stat_homo}
+\end{equation}
+%
+Under $H_0$, $T_{M,n} \xrightarrow{d} \mathcal{N}(0, 1)$ as $M \to \infty$. We reject $H_0$ at level $\alpha$ if $T_{M,n} < -z_{1-\alpha}$.
+
+\begin{theorem}[Size and Power]
+\label{thm:test_homo}
+Under $H_0: \theta = 1$ and Assumptions \ref{assum:invariance}--\ref{assum:homogeneous}:
+\begin{equation*}
+    \limsup_{M \to \infty} \mathbb P_{H_0}(T_{M,n} < -z_{1-\alpha}) \leq \alpha.
+\end{equation*}
+For any fixed alternative $H_1: \theta = \theta_1 < 1$:
+\begin{equation*}
+    \lim_{M \to \infty} \mathbb P_{H_1}(T_{M,n} < -z_{1-\alpha}) = 1,
+\end{equation*}
+\end{theorem}
+
+% \begin{proof}
+% Under $H_0$, Theorem \ref{thm:homogeneous} gives:
+% \begin{equation}
+%     \sqrt{M}(\bar{U}_{M,n} - 1) \xrightarrow{d} \mathcal{N}\left(0, \frac{4\zeta_1^2}{n+1}\right)
+% \end{equation}
+
+% By the Law of Large Numbers applied to i.i.d. random variables $U_n^m$:
+% \begin{equation}
+%     \hat{\sigma}_U^2 \xrightarrow{p} \mathbb V[U_n^m] = \frac{4\zeta_1^2}{n+1}
+% \end{equation}
+
+% By Slutsky's theorem:
+% \begin{equation}
+%     T_{M,n} = \frac{\sqrt{M}(\bar{U}_{M,n} - 1)}{\hat{\sigma}_U} \xrightarrow{d} \mathcal{N}(0, 1)
+% \end{equation}
+
+% Therefore:
+% \begin{equation}
+%     \lim_{M \to \infty} \mathbb P_{H_0}(T_{M,n} < -z_{1-\alpha}) = \mathbb P(\mathcal{N}(0,1) < -z_{1-\alpha}) = \alpha
+% \end{equation}
+
+% For power under $H_1: \theta = \theta_1 < 1$:
+% \begin{equation}
+%     T_{M,n} = \frac{\sqrt{M}(\theta_1 - 1)}{\hat{\sigma}_U} + \frac{\sqrt{M}(\bar{U}_{M,n} - \theta_1)}{\hat{\sigma}_U}
+% \end{equation}
+
+% Since $\theta_1 < 1$ and $\hat{\sigma}_U \xrightarrow{p} \sqrt{\frac{4\zeta_1^2}{n+1}} > 0$:
+% \begin{equation}
+%     \frac{\sqrt{M}(\theta_1 - 1)}{\hat{\sigma}_U} \to -\infty
+% \end{equation}
+% while $\frac{\sqrt{M}(\bar{U}_{M,n} - \theta_1)}{\hat{\sigma}_U} = O_p(1)$ by Theorem \ref{thm:homogeneous}. Therefore:
+% \begin{equation}
+%     \mathbb P_{H_1}(T_{M,n} < -z_{1-\alpha}) \to 1
+% \end{equation}
+% \end{proof}
+
+This theorem establishes two essential properties of the proposed test. The size control guarantee ensures the test has asymptotic false positive rate at most $\alpha$: when the agent is truly consistent ($\theta = 1$), we incorrectly reject consistency with probability no greater than the nominal level $\alpha$. This prevents spurious detection of inconsistency due to sampling noise. The power guarantee ensures the test reliably detects genuine inconsistency: when the agent's true consistency is $\theta_1 < 1$, the test correctly rejects the null hypothesis with probability approaching 1 as we collect more instances. Together, these properties establish that our test is both conservative (controlling false positives) and sensitive (detecting true inconsistency), making it a rigorous tool for agent evaluation.
+
+
+For moderate $M$, we can construct conservative confidence intervals using the $t$-distribution:
+\begin{equation*}
+    \bar{U}_{M,n} \pm \frac{t_{M-1, 1-\alpha/2} \cdot \hat{\sigma}_U}{\sqrt{M}},
+\end{equation*}
+where $t_{M-1, 1-\alpha/2}$ is the $(1-\alpha/2)$ quantile of the $t$-distribution with $M-1$ degrees of freedom. Consequently, the test statistic in \eqref{eq:test_stat_homo} provides exact size control under normality of $U_n^m$ and is conservative otherwise.
+
+\section{Execution Trajectories as Stochastic Processes}
+
+While consistency in Large Language Models (LLMs) is typically framed as the \textbf{semantic stability} of isolated text generations, the transition to autonomous agents shifts the focus to the reliability of \textbf{execution traces}. In standard LLMs, inconsistency manifests as contradictory answers to a static query; in agentic workflows, these contradictions compound across sequential decision-making steps, leading to \textbf{trajectory drift}. To bridge this gap, we move beyond measuring sentence-level entropy and instead evaluate agentic reliability as a \textbf{stochastic process}. This requires a framework that treats an agent's beliefs and actions not merely as text, but as a sequence of state transitions that must remain logically coherent over time.
+
+To quantify this internal reliability, we formalize the inherent stochasticity of LLM outputs as variability in agent execution. While repeated LLM calls for similar contexts may be treated as samples from a conditional distribution $P(Y \mid X)$, an agent's behavior—comprising its sequence of beliefs, actions, and observations—may be generalized to samples from a stochastic process. Each task execution yields a trajectory $\tau$ sampled from a distribution over possible behaviors. In this view, internal consistency is a statistical property: a reliable agent should produce (semantically or otherwise) equivalent trajectories across repeated trials, even under minor input permutations.
+
+We formalize this interaction using the framework of \textbf{Partially Observable Markov Decision Processes (POMDPs)}. The agent maintains a belief state $b_t$ over latent environment states $s_t \in \mathcal{S}$, updating this belief based on observations $o_t \in \mathcal{O}$ and selecting actions via a policy $\pi$. The agent-environment interaction is defined as:
+
+\begin{align}
+    \mathcal{M} &= (\mathcal{S}, \mathcal{A}, \mathcal{O}, \mathcal{T}, \Omega, R, \gamma) \nonumber \\
+    s_t &\in \mathcal{S} \quad &\text{(Latent environment state)} \nonumber \\
+    a_t &\sim \pi(\cdot \mid b_t) \quad &\text{(Policy-driven action)} \nonumber \\
+    o_t &\sim \Omega(\cdot \mid s_t, a_{t-1}) \quad &\text{(Environment observation)} \nonumber \\
+    b_t(s) &= \mathbb{P}(s_t = s \mid o_{1:t}, a_{1:t-1}) \quad &\text{(Recursive belief update)} \nonumber
+\end{align}
+
+An execution run generates a trajectory $\tau = (b_0, a_0, o_1, b_1, \dots, a_{T-1}, o_T, b_T)$, capturing the agent's internal reasoning and decision-making dynamics. By analyzing the \textbf{distributional divergence} between these trajectories—specifically measuring variability in the belief-action sequence—we can rigorously quantify where an agent's logic deviates and identify the onset of semantic drift or hallucinated state transitions.
+
+\ag{TODO}
+
+
+% \subsection{Consistency Under Distribution Shift from Perturbations}
+
+% We now consider scenarios where semantic perturbations induce distribution shifts, causing the agent to produce outputs from $k$ distinct distributions. This models cases where perturbations genuinely alter the task semantics, changing the set of desired answers.
+
+% Suppose the perturbations partition into $k$ distinct classes $\{C_1, \ldots, C_k\}$, where prompts within the same class induce the same output distribution. %For example:
+% % \begin{itemize}[nolistsep,leftmargin=*]
+% %     \item Different phrasings of the same question may lead to different interpretations
+% %     \item Typos or formatting changes may trigger different reasoning pathways
+% %     \item Contextual variations may shift the task slightly
+% % \end{itemize}
+% Let $n_j$ denote the number of prompts in class $C_j$, with $\sum_{j=1}^k n_j = n+1$ (including $x_0$). For each prompt $x_i$ in class $C_j$, we sample:
+% \begin{equation}
+%     y_i \sim P_j(Y), \quad \text{where } P_j(Y) = P(Y|X \in C_j),
+% \end{equation}
+% %
+% So that the outputs form form $k$ groups of i.i.d. samples.
+
+% The U-statistic $U_n$ now estimates a mixture parameter:
+% \begin{equation}
+%     \theta_{\text{mix}} = \sum_{j=1}^k \sum_{j'=1}^k w_j w_{j'} \mathbb E_{Y \sim P_j, Y' \sim P_{j'}}[k(Y, Y')]
+% \end{equation}
+% where $w_j = n_j / (n+1)$ is the proportion of samples from class $j$.
+
+% This can be decomposed as:
+% \begin{align}
+%     \theta_{\text{mix}} &= \underbrace{\sum_{j=1}^k w_j^2 \mathbb E_{Y, Y' \sim P_j}[k(Y, Y')]}_{\text{within-class similarity}} + \underbrace{\sum_{j \neq j'} w_j w_{j'} \mathbb E_{Y \sim P_j, Y' \sim P_{j'}}[k(Y, Y')]}_{\text{cross-class similarity}} \\
+%     &= \theta_{\text{within}} + \theta_{\text{cross}}
+% \end{align}
+
+% When distributions differ substantially, $\theta_{\text{cross}} < \theta_{\text{within}}$, leading to $\theta_{\text{mix}} < \theta_{\text{within}}$. Thus, $U_n$ will be smaller than it would be under invariance, indicating inconsistency.
+
+% % \subsubsection{Asymptotic Theory Under Mixture}
+
+% Define class-specific projections:
+% \begin{equation}
+%     k_{1,j}(y) = \mathbb E_{Y' \sim P_j}[k(y, Y')] - \mathbb E_{Y \sim P_j, Y' \sim P_j}[k(Y, Y')]
+% \end{equation}
+
+% \begin{theorem}[Asymptotic Normality Under Mixture]
+% \label{thm:asymptotic_mixture}
+% Assume $\mathbb E[k(Y, Y')^2] < \infty$ for all pairs $(Y, Y') \sim (P_j, P_{j'})$. Suppose $w_j \to \omega_j \in (0, 1)$ as $n \to \infty$ for each $j$. Let:
+% \begin{equation}
+%     \zeta_{\text{mix}}^2 = 4 \sum_{j=1}^k \omega_j^2 \mathbb E[k_{1,j}(Y)^2], \quad Y \sim P_j
+% \end{equation}
+% Then:
+% \begin{equation}
+%     \sqrt{n+1}(U_n - \theta_{\text{mix}}) \xrightarrow{d} \mathcal{N}(0, \zeta_{\text{mix}}^2)
+% \end{equation}
+% \end{theorem}
+
+% \begin{proof}[Proof Sketch]
+% The Hoeffding decomposition for stratified samples gives:
+% \begin{equation}
+%     U_n - \theta_{\text{mix}} = \sum_{j=1}^k \frac{2n_j}{n+1} \cdot \frac{1}{n_j} \sum_{i \in C_j} k_{1,j}(y_i) + R_n
+% \end{equation}
+% where $R_n = o_p((n+1)^{-1/2})$. Within each class $C_j$, the samples are i.i.d. from $P_j$. The CLT applied to each group, combined with independence across groups, yields:
+% \begin{equation}
+%     \frac{2}{\sqrt{n+1}} \sum_{j=1}^k n_j \cdot \frac{1}{n_j} \sum_{i \in C_j} k_{1,j}(y_i) \xrightarrow{d} \mathcal{N}\left(0, 4 \sum_{j=1}^k \omega_j^2 \mathbb E[k_{1,j}(Y)^2] \right)
+% \end{equation}
+% by the Lindeberg-Feller CLT for heterogeneous summands.
+% \end{proof}
+
+% % \subsubsection{Testing for Distribution Shift}
+
+% Under the null hypothesis of no distribution shift:
+% \begin{align}
+%     H_0&: P_1(Y) = \cdots = P_k(Y) \quad \text{(invariance)} \\
+%     H_1&: P_j(Y) \neq P_{j'}(Y) \text{ for some } j \neq j'
+% \end{align}
+
+% Under $H_0$, $\theta_{\text{mix}} = \theta$ (the common parameter), and the test from Section 3.2 applies. Under $H_1$, we expect $U_n$ to be smaller due to cross-class dissimilarity, leading to rejection when $T_n < -z_{1-\alpha}$.
+
+% However, if class labels are known, a more powerful approach is to compare within-class and cross-class statistics directly. Define:
+% \begin{equation}
+%     U_{\text{within}} = \frac{\sum_{j=1}^k \sum_{i, i' \in C_j, i < i'} k(y_i, y_{i'})}{\sum_{j=1}^k \binom{n_j}{2}}, \quad U_{\text{cross}} = \frac{\sum_{j < j'} \sum_{i \in C_j, i' \in C_{j'}} k(y_i, y_{i'})}{\sum_{j < j'} n_j n_{j'}}
+% \end{equation}
+
+% Under $H_0$, $\mathbb E[U_{\text{within}}] = \mathbb E[U_{\text{cross}}] = \theta$. Under $H_1$, typically $\mathbb E[U_{\text{within}}] > \mathbb E[U_{\text{cross}}]$. A test based on:
+% \begin{equation}
+%     D_n = U_{\text{within}} - U_{\text{cross}}
+% \end{equation}
+% rejects $H_0$ for large values of $D_n$, with asymptotic distribution derived from Theorem \ref{thm:asymptotic_mixture}.
+
+% % \subsubsection{Interpretation and Practical Implications}
+
+% When perturbations induce distribution shifts, the consistency framework reveals:
+
+% \begin{itemize}[nolistsep,leftmargin=*]
+%     \item \textbf{Failure of semantic equivalence:} The perturbation operator $\mathcal{P}$ does not preserve task semantics, or the agent interprets perturbations as distinct tasks.
+    
+%     \item \textbf{Clustering of behaviors:} The $k$ classes represent distinct behavioral modes. Identifying these classes (e.g., via clustering $\{y_i\}$ or analyzing $\{x_i\}$) reveals which perturbations trigger different responses.
+    
+%     \item \textbf{Within-class consistency:} Even if $P_j \neq P_{j'}$, examining $U_{\text{within}}$ for each class separately assesses whether the agent is at least consistent within each interpretation.
+    
+%     \item \textbf{Design implications:} High $\theta_{\text{within}}$ but low $\theta_{\text{cross}}$ suggests the agent is deterministic but overly sensitive to input variations. Mitigation strategies include prompt canonicalization, instruction tuning on paraphrases, or architectural changes to improve robustness.
+% \end{itemize}
+
+% The mixture framework also applies when class labels are unknown. Clustering methods (e.g., k-means on embeddings of $\{y_i\}$) can discover latent classes, and the statistics $U_{\text{within}}$ and $U_{\text{cross}}$ can be computed post-hoc to quantify the extent of distribution shift.
+
+% % \begin{theorem}[Size Control for Output Consistency Test]
+% % \label{thm:size_output}
+% % Under $H_0: \theta_{\text{output}} = 1$, the test satisfies:
+% % \begin{equation}
+% %     \limsup_{n \to \infty} \mathbb P_{H_0}(T_n^{\text{output}} < -z_{1-\alpha}) \leq \alpha
+% % \end{equation}
+% % provided $\mathbb E[k(Y, Y')^2] < \infty$, $\zeta_1^2 > 0$, and $\hat{\sigma}^2 \xrightarrow{p} 4\zeta_1^2$.
+% % \end{theorem}
+
+% % \begin{proof}
+% % Under $H_0$, by Theorem \ref{thm:asymptotic_output}, $\sqrt{n}(U_n - 1) \xrightarrow{d} \mathcal{N}(0, 4\zeta_1^2)$. Since $\hat{\sigma}^2 \xrightarrow{p} 4\zeta_1^2 > 0$, by Slutsky's theorem:
+% % \begin{equation}
+% %     T_n^{\text{output}} = \frac{\sqrt{n}(U_n - 1)}{\hat{\sigma}} \xrightarrow{d} \mathcal{N}(0, 1)
+% % \end{equation}
+% % Therefore:
+% % \begin{equation}
+% %     \lim_{n \to \infty} \mathbb P_{H_0}(T_n^{\text{output}} < -z_{1-\alpha}) = \mathbb P(\mathcal{N}(0,1) < -z_{1-\alpha}) = \alpha
+% % \end{equation}
+% % \end{proof}
+
+% % \begin{theorem}[Power Against Output Variability]
+% % \label{thm:power_output}
+% % For any fixed alternative $H_1: \theta_{\text{output}} = \theta_1 < 1$:
+% % \begin{equation}
+% %     \lim_{n \to \infty} \mathbb P_{H_1}(T_n^{\text{output}} < -z_{1-\alpha}) = 1
+% % \end{equation}
+% % \end{theorem}
+
+% % \begin{proof}
+% % Under $H_1$, by Theorem \ref{thm:asymptotic_output}:
+% % \begin{equation}
+% %     \sqrt{n}(U_n - \theta_1) \xrightarrow{d} \mathcal{N}(0, 4\zeta_1^2)
+% % \end{equation}
+% % Thus:
+% % \begin{equation}
+% %     T_n^{\text{output}} = \frac{\sqrt{n}(\theta_1 - 1)}{\hat{\sigma}} + \frac{\sqrt{n}(U_n - \theta_1)}{\hat{\sigma}}
+% % \end{equation}
+% % Since $\hat{\sigma} \xrightarrow{p} 2\zeta_1 > 0$ and $\theta_1 < 1$:
+% % \begin{equation}
+% %     \frac{\sqrt{n}(\theta_1 - 1)}{\hat{\sigma}} = \frac{\sqrt{n}(\theta_1 - 1)}{2\zeta_1}(1 + o_p(1)) \to -\infty
+% % \end{equation}
+% % while $\frac{\sqrt{n}(U_n - \theta_1)}{\hat{\sigma}} = O_p(1)$. Therefore:
+% % \begin{equation}
+% %     \mathbb P_{H_1}(T_n^{\text{output}} < -z_{1-\alpha}) \to 1
+% % \end{equation}
+% % \end{proof}
+
+
+
+\section{Experiments}
+\label{sec:exp}
+
+We evaluate agent consistency by measuring behavioral stability under semantically preserving perturbations while tracking task success. For each benchmark instance, we execute one base trial and $n$ perturbed variants, all within the Harbor framework\footnote{\url{https://github.com/harbor-framework/harbor}}, logging complete trajectories, outputs, and verification outcomes.
+
+\subsection{Benchmarks}
+
+We evaluate our framework on three diverse agentic benchmarks spanning software engineering, data transformation, and function calling domains.
+
+\paragraph{SWE-bench Verified}
+SWE-bench evaluates code-level issue resolution on real GitHub repositories \cite{jimenez2024swebench}. We use the \texttt{princeton-nlp/SWE-bench\_Verified} subset, comprising 500 human-validated instances where agents must modify source code to satisfy test suites. Each instance specifies a problem statement, base commit, test patch, and repository metadata. We convert instances into executable Harbor tasks containing (i) instruction text extracted from GitHub issues, (ii) Dockerized environment configurations, (iii) test harnesses, and (iv) solution scaffolding. Instance identifiers and commit hashes enable perturbation tracking across trials.
+
+\paragraph{Spider2-DBT}
+Spider2 is an enterprise-scale benchmark for text-to-SQL generation and data workflow automation \cite{lei2024spider}. We focus on the DBT variant, which requires agents to execute repository-level transformations on DuckDB backends. Tasks are instantiated from local Spider2 checkpoints, with each Harbor task containing a dbt project, input database, and verifier comparing outputs against gold standards. Perturbations can be applied at both the instruction and database schema levels, with variants linked via \texttt{source\_instance\_id} metadata.
+
+\paragraph{BFCL}
+The Berkeley Function Calling Leaderboard (BFCL) evaluates structured function invocation across multiple calling patterns \cite{patil2024bfcl}. We use BFCL v4 task definitions and reference solutions from the Gorilla repository, optionally restricting to specific categories (e.g., \texttt{simple\_python}, \texttt{parallel}, \texttt{simple\_java}). Tasks are converted to Harbor format with function schemas, runtime environments, and verifiers that validate predicted function-call structures against accepted references.
+
+\subsection{Perturbation Framework}
+
+\sm{Take a pass}
+We apply semantically equivalent perturbations at both prompt and task levels to isolate different consistency dimensions.
+
+\paragraph{Prompt-level perturbations}
+These perturbations modify the instruction text while preserving semantic content. We apply them across input prompts in all three benchmarks.
+
+\begin{itemize}[nolistsep,leftmargin=*]
+    \item \textbf{LLM paraphrase}: Instructions are rewritten by a language model to preserve meaning while varying lexical choices and discourse structure.
+    \item \textbf{Back-translation}: Instructions are translated through a pivot language (e.g., French, German) and back to English, inducing natural syntactic and lexical variation.
+    \item \textbf{Noise Injection}: Instructions are appended at various positions with irrelevant texts, URLs, instructions, sentiments or delimiters to disrupt the instruction structure. SWE-Bench specific injections inherit these along with options to add time limits for task completions or maintain standard coding practices.
+\end{itemize}
+
+\paragraph{Task-level perturbations}
+These perturbations modify task environments while preserving functional requirements. We apply them selectively to the benchmark(s) they are relevant to.
+
+\begin{itemize}[nolistsep,leftmargin=*]
+    \item \textbf{SWE-Bench environment perturbations}: A fake MCP server for the Linear API\footnote{\url{https://linear.app/docs/mcp}} is introduced in the agentic environment to substitute direct problem statement comprehension with MCP-based issue-tracking and retrieval, prior to applying a patch. Another perturbation involves systematically renaming common variable and function names across source files via injected setup scripts. Solution artifacts are automatically transformed to maintain compatibility with renamed interfaces.
+    \item \textbf{Spider2-DBT schema perturbation}: Input databases undergo timestamp format changes, column header reordering, and probabilistic header translation. All perturbations are logged for auditability.
+    \item \textbf{BFCL tool perturbations}: We apply (i) decoy function insertion into documentation, (ii) parameter reordering in function signatures, and (iii) output format shifts (JSON $\leftrightarrow$ XML) with synchronized updates to oracles and verifiers.
+\end{itemize}
+
+Given a perturbation set $\mathcal{P}$ and repetition count $K$, we generate $K$ independent perturbed variants per instance and execute all variants in parallel.
+
+\subsection{Evaluation Metrics}
+
+\paragraph{Task success rate}
+\sm{TODO}
+
+\paragraph{Consistency metrics}
+To measure output consistency, we use X metrics.
+To measure trace-level consistency, we use Y metric.
+\sm{TODO}
+
+These metrics enable fine-grained analysis of semantic consistency beyond binary task success, allowing us to distinguish between agents that succeed inconsistently versus those that fail consistently.
+
+\subsection{Results}
+
+Table~\ref{tab:swebench} presents consistency results on SWE-bench Verified. Table~\ref{tab:spider2dbt} reports results on Spider2-DBT. Table~\ref{tab:bfcl} shows results on BFCL. Consistency is computed as the per-example binary match rate: 1.0 if base and all perturbed runs agree (both pass or both fail), 0.0 otherwise, averaged across all examples.
+
+\begin{table}[h]
+\centering
+\caption{SWE-bench Verified consistency results.}
+\label{tab:swebench}
+\begin{tabular}{llcccc}
+\toprule
+Agent + Model & Perturbation & Base Acc & Pert Acc & Consistency \\
+\midrule
+\multicolumn{5}{l}{\textit{Codex + GPT-5-mini}} \\
+ & linear\_mcp & 0.660 & 0.456 & 0.516 \\
+ & injection\_swe & 0.472 & 0.486 & 0.814 \\
+ & var\_rename & 0.677 & 0.480 & 0.409 \\
+\midrule
+\multicolumn{5}{l}{\textit{OpenHands + Kimi-K2 (0711)}} \\
+ & injection\_swe & 0.589 & 0.601 & 0.732 \\
+ & noise & 0.672 & 0.617 & 0.791 \\
+ & paraphrase & 0.471 & 0.505 & 0.779 \\
+ & translation & 0.606 & 0.615 & 0.775 \\
+ & linear\_mcp & 0.654 & 0.090 & 0.327 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Spider2-DBT consistency results.}
+\label{tab:spider2dbt}
+\begin{tabular}{llcccc}
+\toprule
+Agent + Model & Perturbation & Base Acc & Pert Acc & Consistency \\
+\midrule
+\multicolumn{5}{l}{\textit{Codex + GPT-5-mini}} \\
+ & header-shuffle & 0.141 & 0.109 & 0.969 \\
+ & header-translate & 0.141 & 0.109 & 0.969 \\
+ & timestamp & 0.172 & 0.188 & 0.828 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{BFCL consistency results.}
+\label{tab:bfcl}
+\begin{tabular}{llcccc}
+\toprule
+Agent + Model & Perturbation & Base Acc & Pert Acc & Consistency \\
+\midrule
+\multicolumn{5}{l}{\textit{Codex + GPT-5-mini}} \\
+ & perturbs & 0.833 & 0.667 & 0.750 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Discussion}
+
+\section{Conclusion}
+
+\section*{Acknowledgements}
+
+\bibliographystyle{plain}
+\bibliography{sample}
+
+\appendix
+
+\section{Proofs}
+
+\subsection{Proof of Theorem \ref{thm:homogeneous}}
+
+Under Assumption \ref{assum:homogeneous}, all $U_n^m$ are i.i.d. with $\mathbb E[U_n^m] = \theta$. By the Hoeffding decomposition for each instance:
+\begin{equation}
+    U_n^m - \theta = \frac{2}{n+1}\sum_{i=0}^n k_1(y_i^m) + R_n^m
+\end{equation}
+where $R_n^m = o_p((n+1)^{-1/2})$. Under Assumption \ref{assum:invariance}, outputs within instance $m$ are i.i.d., so:
+\begin{equation}
+    \mathbb V[U_n^m] = \frac{4\zeta_1^2}{n+1} + o(n^{-1})
+\end{equation}
+
+By the Central Limit Theorem for i.i.d. random variables:
+\begin{equation}
+    \sqrt{M}(\bar{U}_{M,n} - \theta) = \frac{1}{\sqrt{M}}\sum_{m=1}^M (U_n^m - \theta) \xrightarrow{d} \mathcal{N}\left(0, \frac{4\zeta_1^2}{n+1}\right)
+\end{equation}
+
+\subsection{Proof of Theorem \ref{thm:test_homo}}
+
+Under $H_0$, Theorem \ref{thm:homogeneous} gives:
+\begin{equation}
+    \sqrt{M}(\bar{U}_{M,n} - 1) \xrightarrow{d} \mathcal{N}\left(0, \frac{4\zeta_1^2}{n+1}\right)
+\end{equation}
+
+By the Law of Large Numbers applied to i.i.d. random variables $U_n^m$:
+\begin{equation}
+    \hat{\sigma}_U^2 \xrightarrow{p} \mathbb V[U_n^m] = \frac{4\zeta_1^2}{n+1}
+\end{equation}
+
+By Slutsky's theorem:
+\begin{equation}
+    T_{M,n} = \frac{\sqrt{M}(\bar{U}_{M,n} - 1)}{\hat{\sigma}_U} \xrightarrow{d} \mathcal{N}(0, 1)
+\end{equation}
+
+Therefore:
+\begin{equation}
+    \lim_{M \to \infty} \mathbb P_{H_0}(T_{M,n} < -z_{1-\alpha}) = \mathbb P(\mathcal{N}(0,1) < -z_{1-\alpha}) = \alpha
+\end{equation}
+
+For power under $H_1: \theta = \theta_1 < 1$:
+\begin{equation}
+    T_{M,n} = \frac{\sqrt{M}(\theta_1 - 1)}{\hat{\sigma}_U} + \frac{\sqrt{M}(\bar{U}_{M,n} - \theta_1)}{\hat{\sigma}_U}
+\end{equation}
+
+Since $\theta_1 < 1$ and $\hat{\sigma}_U \xrightarrow{p} \sqrt{\frac{4\zeta_1^2}{n+1}} > 0$:
+\begin{equation}
+    \frac{\sqrt{M}(\theta_1 - 1)}{\hat{\sigma}_U} \to -\infty
+\end{equation}
+while $\frac{\sqrt{M}(\bar{U}_{M,n} - \theta_1)}{\hat{\sigma}_U} = O_p(1)$ by Theorem \ref{thm:homogeneous}. Therefore:
+\begin{equation}
+    \mathbb P_{H_1}(T_{M,n} < -z_{1-\alpha}) \to 1
+\end{equation}
+
+\section{Additional Results}
+
+\subsection{Finite Sample Considerations}
+
+For moderate $M$, we can construct conservative confidence intervals using the $t$-distribution:
+\begin{equation}
+    \bar{U}_{M,n} \pm \frac{t_{M-1, 1-\alpha/2} \cdot \hat{\sigma}_U}{\sqrt{M}}
+\end{equation}
+where $t_{M-1, 1-\alpha/2}$ is the $(1-\alpha/2)$ quantile of the $t$-distribution with $M-1$ degrees of freedom.
+
+For the hypothesis test, we can use:
+\begin{equation}
+    T_{M,n}^{(t)} = \frac{\sqrt{M}(\bar{U}_{M,n} - 1)}{\hat{\sigma}_U}
+\end{equation}
+and reject $H_0$ if $T_{M,n}^{(t)} < -t_{M-1, 1-\alpha}$. This provides exact size control under normality of $U_n^m$ and is conservative otherwise.
+
+\subsection{Instance-Level Diagnostics}
+
+Beyond aggregate testing, we identify outlier instances that deviate from the benchmark-level consistency. For each instance $m$, compute the standardized deviation:
+\begin{equation}
+    Z_m = \frac{U_n^m - \bar{U}_{M,n}}{\hat{\sigma}_U}
+\end{equation}
+
+Under Assumption \ref{assum:homogeneous}, $Z_m$ has mean approximately zero. Outlier instances satisfy $|Z_m| > c$ for some threshold $c$ (e.g., $c = 2$ or $c = 3$).
+
+Alternatively, we can perform instance-specific tests. Define the instance-level variance estimator:
+\begin{equation}
+    \hat{\sigma}_m^2 = \frac{4}{n+1}\sum_{i=0}^n \hat{k}_1(y_i^m)^2
+\end{equation}
+where:
+\begin{equation}
+    \hat{k}_1(y_i^m) = \frac{1}{n}\sum_{j \neq i} k(y_i^m, y_j^m) - U_n^m
+\end{equation}
+
+The instance-level test statistic is:
+\begin{equation}
+    T_n^m = \frac{\sqrt{n+1}(U_n^m - 1)}{\hat{\sigma}_m}
+\end{equation}
+
+Under $H_0^m: \theta = 1$ and Assumption \ref{assum:invariance}, $T_n^m \xrightarrow{d} \mathcal{N}(0, 1)$ as $n \to \infty$. We reject $H_0^m$ (declare instance $m$ inconsistent) if $T_n^m < -z_{1-\alpha}$.
+
+The fraction of inconsistent instances is:
+\begin{equation}
+    \hat{p}_{\text{inconsistent}} = \frac{1}{M}\sum_{m=1}^M \mathbb{1}\{T_n^m < -z_{1-\alpha}\}
+\end{equation}
+
+Under $H_0: \theta = 1$, we expect $\hat{p}_{\text{inconsistent}} \approx \alpha$ asymptotically. Significantly higher values indicate widespread inconsistency, while identifying specific instances enables targeted analysis of failure modes.
+
+\subsection{Asymptotic Efficiency and Optimal Allocation}
+
+Given a total budget of $B$ agent calls, we allocate $M$ instances with $n+1$ perturbations each, where $M(n+1) = B$. The asymptotic variance of $\bar{U}_{M,n}$ is:
+\begin{equation}
+    \text{Avar}[\bar{U}_{M,n}] = \frac{1}{M} \cdot \frac{4\zeta_1^2}{n+1} = \frac{4\zeta_1^2}{B}
+\end{equation}
+
+Under homogeneity (Assumption \ref{assum:homogeneous}), the variance is minimized by spreading the budget evenly: the product $M(n+1) = B$ is fixed, and the variance depends only on the total budget $B$, not on the specific allocation between $M$ and $n$. 
+
+In practice, we choose $M$ and $n$ based on:
+\begin{itemize}[nolistsep,leftmargin=*]
+    \item \textbf{Coverage}: Larger $M$ provides better coverage of the task distribution and more reliable instance-level diagnostics
+    \item \textbf{Per-instance precision}: Larger $n$ provides more precise estimates of $\theta_m$ for individual instances, enabling finer-grained hypothesis tests
+    \item \textbf{Computational constraints}: Perturbations within an instance may be parallelizable, favoring larger $n$ when parallel resources are available
+    \item \textbf{Perturbation diversity}: Some perturbation operators (e.g., paraphrasing) may have limited diversity, placing a practical upper bound on useful $n$
+\end{itemize}
+
+A balanced allocation (e.g., $M \approx n \approx \sqrt{B}$) is often reasonable when no specific constraint dominates. For instance, with $B = 10,000$ total samples, choosing $M = 100$ instances with $n = 99$ perturbations each provides good coverage and per-instance precision.
+
+When Assumption \ref{assum:homogeneous} is violated (i.e., instances have heterogeneous consistency levels), the variance decomposition becomes:
+\begin{equation}
+    \text{Avar}[\bar{U}_{M,n}] = \frac{\sigma_{\text{between}}^2}{M} + \frac{4\bar{\zeta}_1^2}{M(n+1)}
+\end{equation}
+where $\sigma_{\text{between}}^2 = \mathbb V_m[\theta_m]$ and $\bar{\zeta}_1^2 = \mathbb E_m[\zeta_{1,m}^2]$. In this case, optimal allocation depends on the ratio $\sigma_{\text{between}}^2 / \bar{\zeta}_1^2$:
+\begin{itemize}[nolistsep,leftmargin=*]
+    \item High between-instance variance favors larger $M$ (more instances, fewer perturbations each)
+    \item High within-instance variance favors larger $n$ (more perturbations per instance)
+\end{itemize}
+
+The optimal $n$ minimizing total variance under budget constraint $M(n+1) = B$ is:
+\begin{equation}
+    n^* = \left\lceil \sqrt{\frac{4\bar{\zeta}_1^2}{\sigma_{\text{between}}^2}} \right\rceil - 1
+\end{equation}
+
+However, estimating $\sigma_{\text{between}}^2$ and $\bar{\zeta}_1^2$ requires pilot data, and Assumption \ref{assum:homogeneous} provides a reasonable simplification for most benchmark settings.
+
+\end{document}
+
+% ########################################################
+% ## AI Slop. Computational considerations may be useful
+% ########################################################
+% \subsection{Connection to Kernel Two-Sample Testing}
+
+% The input consistency framework naturally connects to kernel two-sample testing. For each pair of prompt variants $(x_i, x_{i'})$, we can apply the kernel two-sample test using Maximum Mean Discrepancy (MMD) \cite{gretton2012kernel}.
+
+% For a characteristic kernel $k: \mathcal{Y} \times \mathcal{Y} \to \mathbb{R}$, the squared MMD between empirical distributions $\hat{P}_i$ and $\hat{P}_{i'}$ is:
+% \begin{equation}
+%     \text{MMD}^2(\hat{P}_i, \hat{P}_{i'}) = \mathbb E_{Y,Y' \sim \hat{P}_i}[k(Y, Y')] - 2\mathbb E_{Y \sim \hat{P}_i, Y' \sim \hat{P}_{i'}}[k(Y, Y')] + \mathbb E_{Y,Y' \sim \hat{P}_{i'}}[k(Y, Y')]
+% \end{equation}
+
+% Under $H_0^{\text{input}}$, $\text{MMD}^2 = 0$. The kernel $k$ is characteristic if MMD = 0 implies distributional equality \cite{sriperumbudur2010hilbert}, ensuring the test has power against all alternatives where $P(Y|x_i) \neq P(Y|x_{i'})$.
+
+% The within-perturbation U-statistic $U_{\text{within}}$ corresponds to the first and third terms of the MMD (average within-distribution similarity), while $U_{\text{cross}}$ corresponds to the middle term (cross-distribution similarity). Their difference provides a natural test statistic for detecting distribution shifts across perturbations.
+
+% \subsection{Trace-Level Consistency for Multi-Step Agents}
+
+% For agents producing trajectories $\mathcal{T} = (a_1, s_1, \ldots, a_T, s_T)$ with actions $a_t$ and states $s_t$ in response to prompt $x_0$, we define a trajectory kernel that captures both action-level and temporal alignment:
+% \begin{equation}
+%     k_{\text{trace}}(\mathcal{T}, \mathcal{T}') = \sum_{t=1}^{\min(|\mathcal{T}|, |\mathcal{T}'|)} w_t \cdot k_a(a_t, a_t') - \lambda \cdot |\text{len}(\mathcal{T}) - \text{len}(\mathcal{T}')|
+% \end{equation}
+% where $w_t$ are time-dependent weights (e.g., $w_t = e^{-\beta t}$ for exponential discounting prioritizing early actions), $k_a$ is a kernel on the action space, and $\lambda \geq 0$ penalizes trajectory length differences.
+
+% The trace-level U-statistic:
+% \begin{equation}
+%     U_n^{\text{trace}} = \binom{n}{2}^{-1} \sum_{1 \leq i < j \leq n} k_{\text{trace}}(\mathcal{T}_i, \mathcal{T}_j)
+% \end{equation}
+% quantifies trajectory-level consistency. High values indicate agents follow similar execution paths, while low values reveal divergence points. All asymptotic results (Theorems \ref{thm:asymptotic_output}–\ref{thm:power_output}) apply with appropriate moment conditions on $k_{\text{trace}}$.
+
+% This trace-level metric enables fine-grained analysis: by examining $k_a(a_t, a_t')$ at each time step $t$, we can identify precisely where agent executions begin to diverge, providing actionable insights for debugging and improving agent reliability. Both output randomness (same trajectory divergence across runs with $x_0$) and input sensitivity (trajectory divergence across perturbed prompts) can be measured using this framework.
+
+% \subsection{Finite Sample Concentration}
+
+% For bounded kernels, Hoeffding's inequality for U-statistics provides finite-sample guarantees:
+
+% \begin{theorem}[Finite Sample Bound]
+% \label{thm:finite}
+% If $k(y, y') \in [a, b]$ almost surely, then for any $\epsilon > 0$:
+% \begin{equation}
+%     \mathbb P(|U_n - \theta| > \epsilon) \leq 2 \exp\left( -\frac{2n\epsilon^2}{(b-a)^2} \right)
+% \end{equation}
+% \end{theorem}
+
+% This exponential concentration enables reliable testing even with moderate sample sizes, critical for practical agent evaluation where obtaining many samples may be computationally expensive. The bound applies to both $U_{\text{within}}$ and $U_{\text{cross}}$ statistics with appropriate sample size adjustments.
+
+% \subsection{Computational Considerations}
+
+% Computing $U_n$ requires $O(n^2)$ kernel evaluations. For large $n$, several approximation strategies maintain asymptotic validity while improving efficiency:
+% \begin{itemize}[nolistsep,leftmargin=*]
+%     \item \textbf{Incomplete U-statistics:} Sample $B \ll \binom{n}{2}$ pairs uniformly at random. The resulting statistic $\tilde{U}_n = \frac{1}{B}\sum_{b=1}^B k(y_{i_b}, y_{j_b})$ remains unbiased and achieves $O(B)$ complexity.
+%     \item \textbf{Block estimation:} Partition outputs into $\sqrt{n}$ blocks. Compute U-statistics within and between blocks, reducing complexity to $O(n)$.
+%     \item \textbf{Kernel approximations:} For shift-invariant kernels like the Gaussian RBF, use random feature maps to approximate $k(y, y') \approx \langle \phi(y), \phi(y') \rangle$ with $\phi: \mathcal{Y} \to \mathbb{R}^D$, reducing pairwise evaluations to $O(nD)$.
+% \end{itemize}
+% These approximations preserve asymptotic validity under regularity conditions \cite{arcones1993limit}, making large-scale consistency evaluation tractable for both output and input consistency tests.
+
+### AI Slop
+% \subsection{Input Randomness: Consistency Under Prompt Perturbations}
+
+% We now consider a complementary scenario where the agent receives semantically equivalent but syntactically different prompts. This measures the agent's robustness to input variations that should ideally produce consistent outputs.
+
+% \subsubsection{Setup}
+
+% Let $\mathcal{P}$ denote a perturbation operator that generates semantically equivalent variants of the original prompt $x_0$. We sample $m$ perturbations:
+% \begin{equation}
+%     x_1, x_2, \ldots, x_m \sim \mathcal{P}(x_0)
+% \end{equation}
+
+% For each prompt variant $x_i$ (including $x_0$), we collect $n_i$ outputs:
+% \begin{equation}
+%     y_{i1}, y_{i2}, \ldots, y_{in_i} \overset{\text{i.i.d.}}{\sim} P(Y | X = x_i), \quad i \in \{0, 1, \ldots, m\}
+% \end{equation}
+
+% The key assumption for input consistency is that semantic equivalence implies distributional equivalence:
+% \begin{equation}
+%     P(Y|X=x_i) = P(Y|X=x_0) \quad \forall i \in \{1, \ldots, m\}
+%     \label{eq:semantic_equivalence}
+% \end{equation}
+
+% Under this assumption, all outputs $\{y_{ij}\}$ are sampled from the same distribution, though indexed by different prompts.
+
+% \subsubsection{Within-Perturbation and Cross-Perturbation Statistics}
+
+% We can compute two types of U-statistics:
+
+% \textbf{Within-perturbation statistic} (measures output randomness for each prompt variant):
+% \begin{equation}
+%     U_{\text{within}} = \frac{\sum_{i=0}^m \sum_{1 \leq j < \ell \leq n_i} k(y_{ij}, y_{i\ell})}{\sum_{i=0}^m \binom{n_i}{2}}
+% \end{equation}
+
+% This estimates:
+% \begin{equation}
+%     \theta_{\text{within}} = \frac{1}{m+1} \sum_{i=0}^m \mathbb E_{Y,Y' \sim P(\cdot|x_i)}[k(Y, Y')]
+% \end{equation}
+
+% Under assumption \eqref{eq:semantic_equivalence}, $\theta_{\text{within}} = \theta_{\text{output}}$.
+
+% \textbf{Cross-perturbation statistic} (measures consistency across different prompts):
+% \begin{equation}
+%     U_{\text{cross}} = \frac{\sum_{i=0}^m \sum_{i' > i} \sum_{j=1}^{n_i} \sum_{\ell=1}^{n_{i'}} k(y_{ij}, y_{i'\ell})}{\sum_{i=0}^m \sum_{i' > i} n_i n_{i'}}
+% \end{equation}
+
+% This estimates:
+% \begin{equation}
+%     \theta_{\text{cross}} = \mathbb E_{i \neq i'} \mathbb E_{Y \sim P(\cdot|x_i), Y' \sim P(\cdot|x_{i'})}[k(Y, Y')]
+% \end{equation}
+
+% Under assumption \eqref{eq:semantic_equivalence}, $\theta_{\text{cross}} = \theta_{\text{output}}$ as well.
+
+% \subsubsection{Testing for Input Consistency}
+
+% The hypothesis of input consistency can be formulated as:
+% \begin{align}
+%     H_0^{\text{input}}&: P(Y|X=x_i) = P(Y|X=x_0) \quad \forall i \\
+%     H_1^{\text{input}}&: P(Y|X=x_i) \neq P(Y|X=x_0) \text{ for some } i
+% \end{align}
+
+% Under $H_0^{\text{input}}$, we expect $U_{\text{within}} \approx U_{\text{cross}}$. A significant difference suggests that perturbations affect the output distribution, violating semantic equivalence.
+
+% We can test this using a two-sample kernel test. Define the test statistic:
+% \begin{equation}
+%     D_{n,m} = U_{\text{within}} - U_{\text{cross}}
+% \end{equation}
+
+% Under $H_0^{\text{input}}$, $D_{n,m} \xrightarrow{p} 0$. The variance of $D_{n,m}$ can be estimated using standard U-statistic theory, and asymptotic normality follows under regularity conditions.
+
+% Alternatively, we can use the MMD-based two-sample test \cite{gretton2012kernel}:
+% \begin{equation}
+%     \text{MMD}^2(\hat{P}_i, \hat{P}_{i'}) = \frac{1}{n_i^2}\sum_{j,\ell} k(y_{ij}, y_{i\ell}) + \frac{1}{n_{i'}^2}\sum_{j,\ell} k(y_{i'j}, y_{i'\ell}) - \frac{2}{n_i n_{i'}}\sum_{j,\ell} k(y_{ij}, y_{i'\ell})
+% \end{equation}
+
+% Testing $\text{MMD}^2(\hat{P}_i, \hat{P}_{i'}) > 0$ for any pair $(i, i')$ provides evidence against $H_0^{\text{input}}$.
+
+% \subsubsection{Decomposing Total Inconsistency}
+
+% We can decompose the overall inconsistency into two sources:
+% \begin{equation}
+%     \text{Total Inconsistency} = \underbrace{(1 - \theta_{\text{within}})}_{\text{Output randomness}} + \underbrace{(\theta_{\text{within}} - \theta_{\text{cross}})}_{\text{Input sensitivity}}
+% \end{equation}
+
+% \begin{itemize}[nolistsep,leftmargin=*]
+%     \item \textbf{Output randomness:} $1 - \theta_{\text{within}}$ quantifies inconsistency due to sampling stochasticity, even when the prompt is fixed.
+%     \item \textbf{Input sensitivity:} $\theta_{\text{within}} - \theta_{\text{cross}}$ quantifies additional inconsistency introduced by prompt perturbations. If this term is large, the agent is sensitive to semantically equivalent reformulations.
+% \end{itemize}
+
+% This decomposition provides actionable insights:
+% \begin{itemize}[nolistsep,leftmargin=*]
+%     \item High output randomness suggests reducing sampling temperature or using deterministic decoding
+%     \item High input sensitivity suggests improving prompt robustness through techniques like prompt ensembling, instruction tuning on paraphrases, or architectural modifications
+% \end{itemize}
+
+% \subsubsection{Asymptotic Theory for Pooled Statistic}
+
+% If we pool all outputs across perturbations (under assumption \eqref{eq:semantic_equivalence}), the pooled U-statistic:
+% \begin{equation}
+%     U_{\text{pooled}} = \frac{\sum_{i=0}^m \sum_{i'=0}^m \sum_{j=1}^{n_i} \sum_{\ell=1}^{n_{i'}} k(y_{ij}, y_{i'\ell})}{\left(\sum_{i=0}^m n_i\right)^2} - \frac{\sum_{i=0}^m \sum_{j=1}^{n_i} k(y_{ij}, y_{ij})}{\sum_{i=0}^m n_i}
+% \end{equation}
+
+% satisfies the same asymptotic theory as Theorem \ref{thm:asymptotic_output}, with $n$ replaced by $N = \sum_{i=0}^m n_i$ (total number of outputs).
+

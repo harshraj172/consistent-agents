@@ -166,8 +166,9 @@ class LinearMCPPerturbation(BasePerturbation):
                 "agent": {"timeout_sec": 3000.0},
             }
         
-        # Add MCP server configuration
-        config["mcp_servers"] = [
+        # Add MCP server configuration under [environment]
+        config.setdefault("environment", {})
+        config["environment"]["mcp_servers"] = [
             {
                 "name": "linear",
                 "transport": "stdio",
@@ -209,9 +210,10 @@ class LinearMCPPerturbation(BasePerturbation):
             lines.append(f'timeout_sec = {config["agent"].get("timeout_sec", 3000.0)}')
             lines.append("")
         
-        if "mcp_servers" in config:
-            for server in config["mcp_servers"]:
-                lines.append("[[mcp_servers]]")
+        env_cfg = config.get("environment", {})
+        if "mcp_servers" in env_cfg:
+            for server in env_cfg["mcp_servers"]:
+                lines.append("[[environment.mcp_servers]]")
                 lines.append(f'name = "{server["name"]}"')
                 lines.append(f'transport = "{server["transport"]}"')
                 lines.append(f'command = "{server["command"]}"')

@@ -10,13 +10,14 @@ class LLMBackTranslationPerturbation(BasePerturbation):
         self,
         model: str = "gpt-4o-mini",
         temperature: float = 0.7,
-        max_tokens: int = 500,
+        max_tokens: int = 4096,
         languages: list[str] | None = None,
         seed: int | None = None,
+        reasoning_effort: str = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        
+
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -25,10 +26,15 @@ class LLMBackTranslationPerturbation(BasePerturbation):
             random.seed(self.seed)
 
         self.languages = languages or ["French", "Spanish", "German", "Hindi", "Japanese", "Arabic"]
-        
+
+        model_kwargs = {}
+        if seed is not None:
+            model_kwargs["seed"] = seed
+        if reasoning_effort is not None:
+            model_kwargs["reasoning_effort"] = reasoning_effort
         self.litellm_model = LitellmModel(
             model_name=model,
-            model_kwargs={"seed": seed} if seed is not None else {}
+            model_kwargs=model_kwargs
         )
 
         tmpl_dir = (
@@ -55,11 +61,15 @@ class LLMBackTranslationPerturbation(BasePerturbation):
 
         language = random.choice(self.languages)
 
-        p1 = self.en_to_lang_tmpl.format(language=language, text=text)
-        t_lang = self._chat(p1)
+        try:
+            p1 = self.en_to_lang_tmpl.format(language=language, text=text)
+            t_lang = self._chat(p1)
 
-        p2 = self.lang_to_en_tmpl.format(language=language, text=t_lang)
-        return self._chat(p2)
+            p2 = self.lang_to_en_tmpl.format(language=language, text=t_lang)
+            return self._chat(p2)
+        except Exception as e:
+            print(f"[translation] Back-translation failed ({type(e).__name__}: {e}), returning original text")
+            return text
 
 
 

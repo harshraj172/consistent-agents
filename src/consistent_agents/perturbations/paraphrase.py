@@ -13,20 +13,26 @@ class LLMParaphrasePerturbation(BasePerturbation):
     def __init__(self,
                  model: str = "gpt-4o-mini",
                  temperature: float = 0.7,
-                 max_tokens: int = 500,
+                 max_tokens: int = 4096,
                  seed: int = None,
+                 reasoning_effort: str = None,
                  **kwargs):
         """Initialize LLM-based paraphrase perturbation."""
         super().__init__(**kwargs)
-        
+
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.seed = seed
-        
+
+        model_kwargs = {}
+        if seed is not None:
+            model_kwargs["seed"] = seed
+        if reasoning_effort is not None:
+            model_kwargs["reasoning_effort"] = reasoning_effort
         self.litellm_model = LitellmModel(
             model_name=model,
-            model_kwargs={"seed": seed} if seed is not None else {}
+            model_kwargs=model_kwargs
         )
     
     def apply(self, text: str, **kwargs) -> str:
@@ -37,7 +43,6 @@ class LLMParaphrasePerturbation(BasePerturbation):
         temperature = kwargs.get('temperature', self.temperature)
         prompt = Path(REPO_ROOT / "src" / "consistent_agents" / "perturbations" / 
                       "prompt-templates" / "paraphrase.txt").read_text()
-        prompt = prompt.replace("{method}", str(random.randint(1, 5)))
         prompt = prompt.replace("{sentence}", text)
         
         try:
