@@ -373,7 +373,7 @@ async def run_harbor_trial_async(
         metadata["instruction_prompt"] = actual_instruction_path.read_text(encoding="utf-8")
 
     try:
-        trial = Trial(trial_config)
+        trial = await Trial.create(trial_config)
         trial_result = await trial.run()
     finally:
         if not harbor_cfg.task.keep:
@@ -471,7 +471,7 @@ async def _process_item_async(
         perturbed_outputs: List[Dict[str, Any]] = []
         pert_output_strs: List[str] = []
 
-        for p_type, p_text, p_inst in perts:
+        for pert_idx, (p_type, p_text, p_inst) in enumerate(perts):
             perturbation_kwargs = None
             is_task_dir_perturbation = getattr(p_inst, 'modifies_task_dir', False)
             if is_task_dir_perturbation:
@@ -522,7 +522,7 @@ async def _process_item_async(
             trajectories.append(
                 AgentTrajectory(
                     example_id=item.id,
-                    variant="perturbation",
+                    variant=f"perturbation_{pert_idx}",
                     prompt=pert_metadata.get("instruction_prompt", p_text),
                     output=pert_output,
                     status=pert_result.status,
