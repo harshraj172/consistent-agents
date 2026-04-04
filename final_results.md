@@ -1,79 +1,81 @@
 # Consistency Evaluation Results
 
-Consistency = per-example binary match rate: 1.0 if base and perturbed runs agree (both pass or both fail), 0.0 otherwise. Averaged across all examples.
+Last updated: 2026-04-04
 
-**Note:** All results below are with **1 perturbed run** per example (n_perturbations=1).
+Consistency = per-example binary match rate: 1.0 if base and ALL perturbed runs agree (both pass or both fail), 0.0 otherwise. Averaged across all valid examples.
 
-## SWE-bench Verified
+## SWE-bench Verified -- Codex + GPT-5-mini
 
-| Agent | Perturbation | N | Base Acc | Pert Acc | Consistency |
-|-------|-------------|---|----------|----------|-------------|
-| GPT5mini | linear-mcp | 500 | 0.660 | 0.456 | 0.516 |
-| GPT5mini | injection_swe | 500 | 0.472 | 0.486 | 0.814 |
+### 1-perturbation runs (complete, N=500)
+
+| Perturbation | N | Base Acc | Pert Acc | Consistency |
+|---|---|---|---|---|
+| linear_mcp | 500 | 0.660 | 0.456 | 0.516 |
+| injection_swe | 500 | 0.472 | 0.486 | 0.814 |
+
+### 3-perturbation runs (stalled -- need --resume)
+
+These runs completed 500 examples but ~370 errored with NonZeroAgentExitCodeError after a Harbor codex.py update on 2026-04-02. Only ~130 have valid results.
+
+| Perturbation | N valid/500 | Base Acc | Pert Acc | Consistency | Status |
+|---|---|---|---|---|---|
+| noise | ~129/500 | 0.676 | 0.623 | 0.690 | Stalled |
+| paraphrase | ~130/500 | 0.697 | 0.684 | 0.737 | Stalled |
+| translation | ~112/500 | 0.705 | 0.702 | 0.741 | Stalled |
+| var_rename | ~93/500 | 0.677 | 0.480 | 0.409 | Stalled |
+
+## SWE-bench Verified -- OpenHands + Kimi K2 (0711)
+
+### 1-perturbation runs (actively running, ~35-50% done)
+
+Model: `openrouter/moonshotai/kimi-k2` via OpenRouter
+
+| Perturbation | N valid/total | Base Acc | Pert Acc | Consistency | Status |
+|---|---|---|---|---|---|
+| injection_swe | 174/348 | 0.141 | 0.142 | 0.897 | Running |
+| linear_mcp | 141/282 | 0.143 | 0.195 | 0.894 | Running |
+| noise | 149/298 | 0.156 | 0.131 | 0.893 | Running |
+| paraphrase | 180/360 | 0.102 | 0.179 | 0.894 | Running |
+| translation | 156/312 | 0.181 | 0.148 | 0.853 | Running |
+| var_rename | 160/320 | 0.193 | 0.104 | 0.812 | Running |
+
+Note: KimiK2 base accuracy is very low (~10-19%). High consistency is largely because the agent fails consistently on both base and perturbed.
 
 ## Spider2-DBT
 
-| Agent | Perturbation | N | Base Acc | Pert Acc | Consistency |
-|-------|-------------|---|----------|----------|-------------|
-| GPT5mini | header-shuffle | 64 | 0.141 | 0.109 | 0.969 |
-| GPT5mini | header-translate | 64 | 0.141 | 0.109 | 0.969 |
-| GPT5mini | timestamp | 64 | 0.172 | 0.188 | 0.828 |
+### Oracle (1-perturbation, N=64) -- COMPLETED
+
+| Perturbation | Base Acc | Pert Acc | Consistency |
+|---|---|---|---|
+| timestamp | 1.000 | 0.969 | 0.969 |
+| header_shuffle | 1.000 | 0.953 | 0.953 |
+| header_translate | 1.000 | 0.953 | 0.953 |
+
+### Codex + GPT-5-mini (N=64) -- COMPLETED
+
+April 4 re-run:
+
+| Perturbation | N | Base Acc | Pert Acc | Consistency |
+|---|---|---|---|---|
+| baseline (no pert) | 64 | 0.250 | -- | -- |
+| timestamp | 64+64 | 0.266 | 0.203 | 0.844 |
+| header_shuffle | 64+64 | 0.266 | 0.125 | 0.797 |
+| header_translate | 64+64 | 0.266 | 0.141 | 0.812 |
+
+### OpenHands + Kimi K2 -- NOT RUN
+
+No configs or results exist. See `experiments/todo-experiments.md` for how to run.
 
 ## BFCL
 
-| Agent | Perturbation | N | Base Acc | Pert Acc | Consistency |
-|-------|-------------|---|----------|----------|-------------|
-| Codex | perturbs | 12 | 0.833 | 0.667 | 0.750 |
+| Agent + Model | Perturbation | N | Base Acc | Pert Acc | Consistency |
+|---|---|---|---|---|---|
+| Codex + GPT5mini | perturbs | 12 | 0.833 | 0.667 | 0.750 |
 
-## SWE-bench Verified — GPT5mini 3 perturbations (in progress)
+## Data Cleanup Log
 
-Consistency: per-example, if base and **all 3** perturbed runs agree → 1, else 0.
-
-| Agent | Perturbation | N | Base Acc | Mean Pert Acc | Consistency | Status |
-|-------|-------------|---|----------|---------------|-------------|--------|
-| Codex+GPT5mini | injection_swe | 0/500 | — | — | — | Cleared, ready to restart |
-| Codex+GPT5mini | noise | 0/500 | — | — | — | Cleared, ready to restart |
-| Codex+GPT5mini | paraphrase | 0/500 | — | — | — | Cleared, ready to restart |
-| Codex+GPT5mini | translation | 0/500 | — | — | — | Cleared, ready to restart |
-| Codex+GPT5mini | var_rename | 93/500 | 0.677 | 0.480 | 0.409 | Filtered (349 quota-failed examples removed), ready to resume |
-
-**Data cleanup (2026-03-14)**: Removed 349/442 var_rename examples where agent had 0 messages due to OpenAI quota exhaustion. Remaining 93 examples have valid agent execution (base_acc=0.677, consistent with 1-pert runs). All 4 prompt-level runs cleared — their results were entirely from quota-degraded period. All configs set to `n_concurrent: 1`. Harbor-trials cleanup cron running every 30 min.
-
-## SWE-bench Verified — OpenHands + Kimi K2 (0711) 3 perturbations (in progress)
-
-Agent: OpenHands (CodeActAgent) | Model: moonshotai/kimi-k2 (0711) via OpenRouter | n_perturbations: 3
-
-Consistency: per-example, if base and **all 3** perturbed runs agree → 1, else 0.
-
-| Agent | Perturbation | N (new) | N (total valid) | Base Acc | Mean Pert Acc | Consistency | Status |
-|-------|-------------|---------|----------------|----------|---------------|-------------|--------|
-| OpenHands+KimiK2 | injection_swe | 56/381 | 56+119=175 | 0.589 | 0.601 | 0.732 | Running |
-| OpenHands+KimiK2 | noise | 67/393 | 67+107=174 | 0.672 | 0.617 | 0.791 | Running |
-| OpenHands+KimiK2 | paraphrase | 68/476 | 68 | 0.471 | 0.505 | 0.779 | Running |
-| OpenHands+KimiK2 | translation | 71/475 | 71 | 0.606 | 0.615 | 0.775 | Running |
-| OpenHands+KimiK2 | linear_mcp | 52/500 | 52 | 0.654 | 0.090 | 0.327 | Running |
-
-**N (new)**: Examples completed in current (valid) run. **N (total valid)**: Includes retained valid examples from earlier runs (injection_swe: 119, noise: 107). Paraphrase/translation restarted fresh due to broken perturbation prompts. Linear_mcp restarted fresh due to MCP registration fix.
-
-**OpenRouter spend**: $1,186.67 total as of 2026-03-26. Burn rate ~$145/day with 5 parallel runs.
-
-**Key observations**:
-- **injection_swe**: Most robust — pert_acc (60.1%) ≈ base_acc (58.9%), consistency 73.2%
-- **noise**: Perturbation drops accuracy moderately (61.7% vs 67.2%), high consistency 79.1%
-- **paraphrase**: High consistency (77.9%), pert_acc slightly above base (50.5% vs 47.1%)
-- **translation**: High consistency (77.5%), pert_acc close to base (61.5% vs 60.6%)
-- **linear_mcp**: Very low pert accuracy (9.0%) — agent can't retrieve issues via MCP, consistency 32.7%
-
-**Bugs fixed during runs**:
-- `rewrite_instruction: false` → `true` for prompt-level perturbations (injection_swe, noise, paraphrase, translation)
-- gpt-5-nano `temperature=0.7` unsupported → added `temperature: 1.0` + `reasoning_effort: minimal`
-- Paraphrase/translation prompt templates rewritten for long-form text (was designed for single sentences)
-- `max_tokens: 500` → `4096` for perturbation models
-- OpenHands `--prerelease=allow` fix for openhands-ai dependency resolution
-- linear_mcp `mcp_servers` written to wrong TOML path (top-level vs `[environment]`)
-
-## Notes
-
-- GPT5mini Spider2-DBT consistency is high (0.97) despite low accuracy because the agent fails consistently on both base and perturbed inputs.
-- Together AI abandoned: Codex uses `/v1/responses` API (incompatible), OpenHands+Qwen2.5-7B too small for SWE-bench tool use, Kimi K2.5/DeepSeek V3.1 had severe API timeouts.
-- **Bug fix (2026-03-12)**: Previous 3-pert runs showed 0% accuracy due to `uv: command not found` in test.sh verifier. The Dockerfile installed `uv` but didn't add it to PATH. Fixed by adding `ENV PATH="/root/.local/bin:${PATH}"` to all 500 task Dockerfiles. Restarting all runs.
+- **2026-04-02**: Cleaned FileNotFoundError failures caused by Harbor codex.py update removing install-codex.sh.j2 template. GPT5mini: removed 355-388 failures per run. KimiK2: removed 140-466 failures per run. All runs restarted with updated Harbor.
+- **2026-03-24**: Cleaned openhands-ai dependency resolution failures (--prerelease=allow fix).
+- **2026-03-14**: Cleaned OpenAI quota exhaustion failures from var_rename (349/442 removed).
+- **2026-03-13**: Fixed rewrite_instruction=false bug, paraphrase/translation prompt templates, gpt-5-nano temperature/reasoning_effort.
+- **2026-03-12**: Fixed uv PATH bug in SWE-bench Dockerfiles.
