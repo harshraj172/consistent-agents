@@ -435,31 +435,47 @@ async def _process_item_async(
     config: EvalConfig,
     perturb_fns: List[Tuple[Callable[[str], str], Dict[str, Any]]],
     semaphore: asyncio.Semaphore,
+    precomputed_base: Optional[str] = None,
 ) -> Tuple[ExampleResult, List[AgentTrajectory], str, List[str]]:
     """Process a single benchmark item with all its perturbations."""
     async with semaphore:
-        # Run base trial
-        base_result = await run_harbor_trial_async(
-            item.prompt,
-            harbor_cfg,
-            item.id,
-            "base",
-            source_task_dir=item.task_dir,
-            rewrite_instruction=harbor_cfg.task.rewrite_instruction,
-        )
-        base_output = base_result.output
-
-        trajectories = [
-            AgentTrajectory(
-                example_id=item.id,
-                variant="base",
-                prompt=item.prompt,
-                output=base_output,
-                status=base_result.status,
-                messages=base_result.messages,
-                metadata={**item.metadata, **dict(base_result.metadata)},
+        if precomputed_base is not None:
+            # Skip the base trial and use precomputed result
+            base_output = precomputed_base
+            trajectories = [
+                AgentTrajectory(
+                    example_id=item.id,
+                    variant="base",
+                    prompt=item.prompt,
+                    output=base_output,
+                    status="precomputed",
+                    messages=[],
+                    metadata=dict(item.metadata),
+                )
+            ]
+        else:
+            # Run base trial
+            base_result = await run_harbor_trial_async(
+                item.prompt,
+                harbor_cfg,
+                item.id,
+                "base",
+                source_task_dir=item.task_dir,
+                rewrite_instruction=harbor_cfg.task.rewrite_instruction,
             )
-        ]
+            base_output = base_result.output
+
+            trajectories = [
+                AgentTrajectory(
+                    example_id=item.id,
+                    variant="base",
+                    prompt=item.prompt,
+                    output=base_output,
+                    status=base_result.status,
+                    messages=base_result.messages,
+                    metadata={**item.metadata, **dict(base_result.metadata)},
+                )
+            ]
 
         perts = generate_perturbations(
             item.prompt,
@@ -561,6 +577,7 @@ async def evaluate_async(
     harbor_cfg: HarborOptions,
     run_dir: Optional[Path] = None,
     timestamp: Optional[datetime] = None,
+    precomputed_bases: Optional[Dict[str, str]] = None,
 ) -> EvalResult:
     """Evaluate all items with concurrent execution."""
     n_concurrent = harbor_cfg.n_concurrent
@@ -570,7 +587,10 @@ async def evaluate_async(
 
     # Create tasks for all items
     tasks = [
-        _process_item_async(item, harbor_cfg, config, perturb_fns, semaphore)
+        _process_item_async(
+            item, harbor_cfg, config, perturb_fns, semaphore,
+            precomputed_base=precomputed_bases.get(str(item.id)) if precomputed_bases else None,
+        )
         for item in items
     ]
 
@@ -693,10 +713,12 @@ def evaluate(
     harbor_cfg: HarborOptions,
     run_dir: Optional[Path] = None,
     timestamp: Optional[datetime] = None,
+    precomputed_bases: Optional[Dict[str, str]] = None,
 ) -> EvalResult:
     """Evaluate with parallelism support."""
     return asyncio.run(evaluate_async(
-        items, benchmark, config, perturb_fns, harbor_cfg, run_dir, timestamp
+        items, benchmark, config, perturb_fns, harbor_cfg, run_dir, timestamp,
+        precomputed_bases=precomputed_bases,
     ))
 
 
@@ -711,6 +733,26 @@ def _load_config(config_path: str | Path) -> Dict[str, Any]:
         raise FileNotFoundError(f"Config file not found: {p}")
     with p.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
+
+
+def _load_base_results(base_from_dir: Path) -> Dict[str, str]:
+    """Load base outputs from a previous run's result.json.
+
+    Returns a dict mapping example_id -> base_output string.
+    """
+    result_path = base_from_dir / "result.json"
+    if not result_path.exists():
+        raise FileNotFoundError(f"No result.json found in {base_from_dir}")
+    with open(result_path, "r") as f:
+        data = json.load(f)
+    bases: Dict[str, str] = {}
+    for ex in data.get("examples", []):
+        ex_id = ex.get("id")
+        base_output = ex.get("base_output", "")
+        if ex_id is not None:
+            bases[str(ex_id)] = base_output
+    print(f"Loaded {len(bases)} precomputed base results from {base_from_dir}")
+    return bases
 
 
 def _load_completed_ids(resume_dir: Path) -> set:
@@ -729,9 +771,10 @@ def _load_completed_ids(resume_dir: Path) -> set:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    # Parse --resume flag
+    # Parse --resume and --base-from flags
     args = list(argv) if argv else sys.argv[1:]
     resume_dir = None
+    base_from_dir = None
     if "--resume" in args:
         idx = args.index("--resume")
         if idx + 1 < len(args):
@@ -739,6 +782,14 @@ def main(argv: Optional[List[str]] = None) -> int:
             args = args[:idx] + args[idx + 2:]
         else:
             print("--resume requires a path to a previous run directory")
+            return 1
+    if "--base-from" in args:
+        idx = args.index("--base-from")
+        if idx + 1 < len(args):
+            base_from_dir = Path(args[idx + 1])
+            args = args[:idx] + args[idx + 2:]
+        else:
+            print("--base-from requires a path to a previous run directory")
             return 1
 
     cfg_path = Path(args[0]) if args else Path("config.yaml")
@@ -814,8 +865,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         run_dir.mkdir(parents=True, exist_ok=True)
         print(f"Saving results incrementally to: {run_dir}")
 
+    # Load precomputed base results if --base-from was provided
+    precomputed_bases: Optional[Dict[str, str]] = None
+    if base_from_dir is not None:
+        precomputed_bases = _load_base_results(base_from_dir)
+
     # Evaluate with incremental saving
-    result = evaluate(items, benchmark, eval_cfg, perturb_entries, harbor_cfg, run_dir, timestamp)
+    result = evaluate(items, benchmark, eval_cfg, perturb_entries, harbor_cfg, run_dir, timestamp,
+                      precomputed_bases=precomputed_bases)
 
     # Merge resumed examples with new results
     if resumed_examples:
