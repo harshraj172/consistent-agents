@@ -17,7 +17,10 @@ def _read_json(path: Path) -> Any:
 
 
 def _write_json(path: Path, payload: Any) -> None:
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _extract_actions_from_atif_steps(
@@ -77,6 +80,7 @@ def _seqs_to_prob_matrix(seqs: Sequence[Sequence[str]]) -> np.ndarray:
         mat = np.divide(mat, row_sums, out=np.zeros_like(mat), where=row_sums > 0)
     return mat
 
+
 def _jsd(p: np.ndarray, q: np.ndarray) -> float:
     sp = float(p.sum())
     sq = float(q.sum())
@@ -88,6 +92,7 @@ def _jsd(p: np.ndarray, q: np.ndarray) -> float:
 
     d = float(jensenshannon(p, q, base=2.0))
     return d * d
+
 
 def _levenshtein_distance(a: Sequence[str], b: Sequence[str]) -> int:
     """
@@ -116,7 +121,9 @@ def _levenshtein_distance(a: Sequence[str], b: Sequence[str]) -> int:
     return prev[-1]
 
 
-def compute_trajectory_metrics_for_run(trajectory_payload: Dict[str, Any]) -> Dict[str, Any]:
+def compute_trajectory_metrics_for_run(
+    trajectory_payload: Dict[str, Any],
+) -> Dict[str, Any]:
     entries = trajectory_payload.get("entries")
     if not isinstance(entries, list):
         raise ValueError("trajectory.json missing 'entries' list")
@@ -172,6 +179,10 @@ def compute_trajectory_metrics_for_run(trajectory_payload: Dict[str, Any]) -> Di
         c_s = 1.0 - mean_norm_edit
         c = 0.5 * (c_d + c_s)
 
+        c_d = round(c_d, 3)
+        c_s = round(c_s, 3)
+        c = round(c, 3)
+
         per_example_id[ex_id] = {
             "K": k,
             "pairs": pairs,
@@ -193,9 +204,9 @@ def compute_trajectory_metrics_for_run(trajectory_payload: Dict[str, Any]) -> Di
     else:
         overall_mean_jsd = total_jsd / float(total_pairs)
         overall_mean_norm_edit = total_norm_edit / float(total_pairs)
-        c_traj_d = 1.0 - overall_mean_jsd
-        c_traj_s = 1.0 - overall_mean_norm_edit
-        c_traj = 0.5 * (c_traj_d + c_traj_s)
+        c_traj_d = round(1.0 - overall_mean_jsd, 3)
+        c_traj_s = round(1.0 - overall_mean_norm_edit, 3)
+        c_traj = round(0.5 * (c_traj_d + c_traj_s), 3)
 
     metrics_payload: Dict[str, Any] = {
         "C_traj_d": c_traj_d,
@@ -234,7 +245,11 @@ def update_result_json_for_run(
     """
     result = _read_json(result_json)
     trajectory_metrics_json = run_dir / "trajectory_metrics.json"
-    metrics_payload = _read_json(trajectory_metrics_json) if trajectory_metrics_json.is_file() else None
+    metrics_payload = (
+        _read_json(trajectory_metrics_json)
+        if trajectory_metrics_json.is_file()
+        else None
+    )
 
     if metrics_payload is None:
         traj = _read_json(trajectory_json)
@@ -250,9 +265,19 @@ def update_result_json_for_run(
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    ap = argparse.ArgumentParser(description="Compute trajectory consistency metrics from trajectory.json.")
-    ap.add_argument("outputs_path", type=str, help="Run directory (contains result.json and trajectory.json)")
-    ap.add_argument("--dry-run", action="store_true", help="Compute but do not modify result.json files")
+    ap = argparse.ArgumentParser(
+        description="Compute trajectory consistency metrics from trajectory.json."
+    )
+    ap.add_argument(
+        "outputs_path",
+        type=str,
+        help="Run directory (contains result.json and trajectory.json)",
+    )
+    ap.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Compute but do not modify result.json files",
+    )
     ap.add_argument(
         "--update-result-json",
         action="store_true",
@@ -264,16 +289,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not run_dir.is_dir():
         raise SystemExit(f"Not a directory: {run_dir}")
 
-    result_json = run_dir / "result.json"
-    if not result_json.is_file():
-        raise SystemExit(f"Missing result.json in: {run_dir}")
-
     trajectory_json = run_dir / "trajectory.json"
     if not trajectory_json.is_file():
         raise SystemExit(f"Missing trajectory.json in: {run_dir}")
 
-    metrics = write_trajectory_metrics_for_run(run_dir, trajectory_json, dry_run=bool(args.dry_run))
+    metrics = write_trajectory_metrics_for_run(
+        run_dir, trajectory_json, dry_run=bool(args.dry_run)
+    )
     if args.update_result_json:
+        result_json = run_dir / "result.json"
+        if not result_json.is_file():
+            raise SystemExit(f"Missing result.json in: {run_dir}")
+
         update_result_json_for_run(
             run_dir,
             result_json,
@@ -288,4 +315,3 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
