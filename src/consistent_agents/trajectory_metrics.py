@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
+import math
 from scipy.spatial.distance import jensenshannon
 
 
@@ -94,10 +95,12 @@ def _jsd(p: np.ndarray, q: np.ndarray) -> float:
     return d * d
 
 
-def _levenshtein_distance(a: Sequence[str], b: Sequence[str]) -> int:
-    """
-    Levenshtein distance for sequences, O(len(a)*len(b)) time, O(min) memory.
-    """
+def _levenshtein_distance(
+    a: Sequence[str], b: Sequence[str], weighted: bool = True
+) -> int:
+    if weighted:
+        return _weighted_levenshtein(a, b)
+
     if a == b:
         return 0
     if not a:
@@ -105,7 +108,6 @@ def _levenshtein_distance(a: Sequence[str], b: Sequence[str]) -> int:
     if not b:
         return len(a)
 
-    # Ensure b is the shorter one for memory efficiency
     if len(b) > len(a):
         a, b = b, a
 
@@ -119,6 +121,95 @@ def _levenshtein_distance(a: Sequence[str], b: Sequence[str]) -> int:
             curr.append(min(ins, dele, sub))
         prev = curr
     return prev[-1]
+
+
+def _weighted_levenshtein(
+    s1: Sequence[str], s2: Sequence[str], mode: str = "exponential", c: float = 2.0
+) -> float:
+    m, n = len(s1), len(s2)
+
+    if m == 0:
+        return float(n)
+    if n == 0:
+        return float(m)
+
+    dp = [[0.0] * (n + 1) for _ in range(m + 1)]
+
+    def weight(i, j):
+        # normalized positions
+        wi = i / m
+        wj = j / n
+        base = (wi + wj) / 2
+
+        if mode == "linear":
+            return base
+        elif mode == "constant":
+            return c * base
+        elif mode == "exponential":
+            return math.exp(base)  # can replace with exp(c * base)
+        else:
+            raise ValueError("Invalid mode")
+
+    # init
+    for i in range(1, m + 1):
+        dp[i][0] = dp[i - 1][0] + weight(i, 0)
+
+    for j in range(1, n + 1):
+        dp[0][j] = dp[0][j - 1] + weight(0, j)
+
+    # DP
+    for i in range(1, m + 1):
+        for j in range(1, n + 1):
+            w = weight(i, j)
+
+            if s1[i - 1] == s2[j - 1]:
+                cost = 0
+            else:
+                cost = w
+
+            dp[i][j] = min(
+                dp[i - 1][j] + w,  # deletion
+                dp[i][j - 1] + w,  # insertion
+                dp[i - 1][j - 1] + cost,  # substitution
+            )
+
+    return dp[m][n]
+
+
+"""
+def weighted_levenshtein(s1, s2):
+    m, n = len(s1), len(s2)
+    # Initialize matrix
+    dp = [[0.0] * (n + 1) for _ in range(m + 1)]
+
+    # Weight function: Higher i/j = higher cost
+    # We use (i/m) or (j/n) to normalize the position
+    
+    for i in range(1, m + 1):
+        dp[i][0] = dp[i-1][0] + (i / m) # Deletion cost increases with index
+    for j in range(1, n + 1):
+        dp[0][j] = dp[0][j-1] + (j / n) # Insertion cost increases with index
+
+    for i in range(1, m + 1):
+        for j in range(1, n + 1):
+            # Calculate current weight (average of the two positions)
+            current_weight = (i / m + j / n) / 2
+            
+            if s1[i-1] == s2[j-1]:
+                cost = 0
+            else:
+                cost = current_weight
+
+            dp[i][j] = min(
+                dp[i-1][j] + current_weight,   # Deletion
+                dp[i][j-1] + current_weight,   # Insertion
+                dp[i-1][j-1] + cost            # Substitution
+            )
+
+
+    return dp[m][n]
+
+"""
 
 
 def compute_trajectory_metrics_for_run(
@@ -222,6 +313,7 @@ def compute_trajectory_metrics_for_run(
 def write_trajectory_metrics_for_run(
     run_dir: Path,
     trajectory_json: Path,
+    output_path: Path,
     *,
     dry_run: bool,
 ) -> Dict[str, Any]:
@@ -229,7 +321,8 @@ def write_trajectory_metrics_for_run(
     metrics_payload = compute_trajectory_metrics_for_run(traj)
 
     if not dry_run:
-        _write_json(run_dir / "trajectory_metrics.json", metrics_payload)
+        _write_json(output_path, metrics_payload)
+
     return metrics_payload
 
 
@@ -283,6 +376,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         action="store_true",
         help="Also add metrics into result.json under key 'trajectory_metrics'",
     )
+    ap.add_argument(
+        "--output-file",
+        type=str,
+        default="trajectory_metrics.json",
+        help="Name of output metrics file (default: trajectory_metrics.json)",
+    )
+
     args = ap.parse_args(argv)
 
     run_dir = Path(args.outputs_path).resolve()
@@ -293,9 +393,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not trajectory_json.is_file():
         raise SystemExit(f"Missing trajectory.json in: {run_dir}")
 
+    output_path = run_dir / args.output_file
+
     metrics = write_trajectory_metrics_for_run(
-        run_dir, trajectory_json, dry_run=bool(args.dry_run)
+        run_dir,
+        trajectory_json,
+        output_path=output_path,
+        dry_run=bool(args.dry_run),
     )
+
     if args.update_result_json:
         result_json = run_dir / "result.json"
         if not result_json.is_file():
@@ -307,6 +413,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             trajectory_json,
             dry_run=bool(args.dry_run),
         )
+
     c = metrics.get("C_traj")
     print(f"{run_dir}: C_traj={c}")
 
