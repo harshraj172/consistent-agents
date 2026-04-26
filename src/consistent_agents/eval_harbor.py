@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import asyncio
 import json
 import random
@@ -176,6 +177,15 @@ def _instantiate_perturbations(cfg_list: List[Dict[str, Any]]) -> List[Tuple[Any
         perts.append((inst, pcfg))
     return perts
 
+def _extract_task_query(text: str) -> Optional[str]:
+    """Extract the natural-language query from a BFCL-style instruction.md."""
+    import re as _re
+    m = _re.search(
+        r"#\s*Task\s*\n\n(.*?)\n\n##\s*Available\s*Functions",
+        text, _re.DOTALL,
+    )
+    return m.group(1) if m else None
+
 
 def generate_perturbations(
     text: str,
@@ -201,9 +211,17 @@ def generate_perturbations(
             if getattr(inst_or_fn, "modifies_task_dir", False) and instance_id:
                 perturbed = inst_or_fn.apply(text, instance_id=instance_id)
             else:
-                perturbed = inst_or_fn.apply(text)
+                query = _extract_task_query(text)
+                if query is not None:
+                    perturbed = inst_or_fn.apply(query)
+                else:
+                    perturbed = inst_or_fn.apply(text)
         elif callable(inst_or_fn):
-            perturbed = inst_or_fn(text)
+            query = _extract_task_query(text)
+            if query is not None:
+                perturbed = inst_or_fn(query)
+            else:
+                perturbed = inst_or_fn(text)
         else:
             perturbed = text
         results.append((name_str, perturbed, inst_or_fn))
@@ -254,7 +272,24 @@ def _prepare_task_dir(
     if rewrite_instruction:
         instruction_path = run_dir / harbor_cfg.task.instruction_file
         instruction_path.parent.mkdir(parents=True, exist_ok=True)
-        instruction_path.write_text(prompt, encoding="utf-8")
+        if instruction_path.is_file():
+            existing = instruction_path.read_text(encoding="utf-8")
+            bfcl_pattern = re.compile(
+                r"(#\s*Task\s*\n\n)(.*?)(\n\n##\s*Available\s*Functions)",
+                re.DOTALL,
+            )
+            if bfcl_pattern.search(existing):
+                patched = bfcl_pattern.sub(
+                    lambda m: m.group(1) + prompt + m.group(3),
+                    existing,
+                    count=1,
+                )
+                if patched != existing:
+                    instruction_path.write_text(patched, encoding="utf-8")
+            else:
+                instruction_path.write_text(prompt, encoding="utf-8")
+        else:
+            instruction_path.write_text(prompt, encoding="utf-8")
     return run_dir
 
 
@@ -481,13 +516,20 @@ async def _process_item_async(
                     "repo": getattr(item, 'repo', None),
                     "base_commit": getattr(item, 'base_commit', None),
                 }
+
+            original_query = _extract_task_query(item.prompt)
+            text_was_perturbed = (
+                not is_task_dir_perturbation
+                and original_query is not None
+                and p_text != original_query
+            )
             pert_result = await run_harbor_trial_async(
                 p_text,
                 harbor_cfg,
                 item.id,
                 p_type,
                 source_task_dir=item.task_dir,
-                rewrite_instruction=harbor_cfg.task.rewrite_instruction,
+                rewrite_instruction= (harbor_cfg.task.rewrite_instruction or text_was_perturbed),
                 perturbation=p_inst if is_task_dir_perturbation else None,
                 perturbation_kwargs=perturbation_kwargs,
             )

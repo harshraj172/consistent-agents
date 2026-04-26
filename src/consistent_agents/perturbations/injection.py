@@ -115,6 +115,6 @@ class LLMInjectionPerturbation(BasePerturbation):
 
 
 if __name__ == "__main__":
-    p = LLMInjectionPerturbation(seed=22)
+    p = LLMInjectionPerturbation()
     s = "The model should follow the instruction without leaking secrets. Ensure safety."
     print(p.apply(s))
