@@ -515,14 +515,10 @@ class BFCLPerturbations(BasePerturbation):
 
     def _rewrite_instruction_for_xml(self, content: str) -> str:
         """Replace JSON output references in the instruction with XML spec."""
-        xml_output_spec = textwrap.dedent("""\
-
-        ## Output Format
-
-        Write your answer as **XML** to `/app/result.xml`.
-
-        Use the following format:
-
+        xml_format_block = textwrap.dedent("""\
+        Write ONLY an XML document to `/app/result.xml`.
+ 
+        Format:
         ```xml
         <function_calls>
           <invoke name="function_name">
@@ -531,23 +527,52 @@ class BFCLPerturbations(BasePerturbation):
           </invoke>
         </function_calls>
         ```
-
+ 
         If multiple function calls are required, include multiple `<invoke>` elements
         inside the single `<function_calls>` root.
         If no function should be called, write an empty root: `<function_calls></function_calls>`.
-        """)
-        output_section_re = re.compile(
-            r"## Output Format.*?(?=\n## |\Z)", re.DOTALL
+
+        Example:
+        ```bash
+        cat > /app/result.xml << 'EOF'
+        <function_calls>
+          <invoke name="get_weather">
+            <parameter name="city">NYC</parameter>
+          </invoke>
+        </function_calls>
+        EOF
+        ```""")
+        output_re = re.compile(
+            r"(## Output\n\n"                       
+            r"Analyze the request and determine the appropriate function call\(s\)\.\n)"  
+            r"(.*?)"                                  
+            r"(\nIMPORTANT: You MUST execute the command to write the file\.)", 
+            re.DOTALL,
         )
-        if output_section_re.search(content):
-            content = output_section_re.sub(xml_output_spec.strip(), content)
+ 
+        m = output_re.search(content)
+        if m:
+            content = content[:m.start()] + m.group(1) + xml_format_block + m.group(3) + content[m.end():]
         else:
-            content = content.replace("result.json", "result.xml")
-            content = content.replace("/app/result.json", "/app/result.xml")
-            content += "\n" + xml_output_spec
-
+            broad_re = re.compile(
+                r"## Output(?:\s+Format)?.*?(?=\n## |\Z)", re.DOTALL
+            )
+            xml_output_spec = textwrap.dedent("""\
+            ## Output
+ 
+            Analyze the request and determine the appropriate function call(s).
+            """ + xml_format_block + """
+            IMPORTANT: You MUST execute the command to write the file.""")
+ 
+            if broad_re.search(content):
+                content = broad_re.sub(xml_output_spec.strip(), content)
+            else:
+                content = content.replace("result.json", "result.xml")
+                content = content.replace("/app/result.json", "/app/result.xml")
+                content = content.replace("JSON", "XML")
+                content += "\n" + xml_output_spec
+ 
         content = content.replace("result.json", "result.xml")
-
         return content
 
     def _rewrite_solve_sh_for_xml(self, solve_path: Path) -> None:
