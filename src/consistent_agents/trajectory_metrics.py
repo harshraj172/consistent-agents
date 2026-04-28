@@ -12,6 +12,8 @@ import numpy as np
 import math
 from scipy.spatial.distance import jensenshannon
 
+CONSTANT_MULTIPLIER = 3.0
+
 
 def _read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -96,35 +98,39 @@ def _jsd(p: np.ndarray, q: np.ndarray) -> float:
 
 
 def _levenshtein_distance(
-    a: Sequence[str], b: Sequence[str], weighted: bool = True
-) -> int:
-    if weighted:
-        return _weighted_levenshtein(a, b)
+    a: Sequence[str],
+    b: Sequence[str],
+    *,
+    mode: str = "unweighted",
+) -> float:
+    if mode != "unweighted":
+        return _weighted_levenshtein(a, b, mode=mode)
 
     if a == b:
-        return 0
+        return 0.0
     if not a:
-        return len(b)
+        return float(len(b))
     if not b:
-        return len(a)
+        return float(len(a))
 
     if len(b) > len(a):
         a, b = b, a
 
     prev = list(range(len(b) + 1))
     for i, ca in enumerate(a, start=1):
-        curr = [i]
+        curr = [float(i)]
         for j, cb in enumerate(b, start=1):
-            ins = curr[j - 1] + 1
-            dele = prev[j] + 1
-            sub = prev[j - 1] + (0 if ca == cb else 1)
+            ins = curr[j - 1] + 1.0
+            dele = prev[j] + 1.0
+            sub = prev[j - 1] + (0.0 if ca == cb else 1.0)
             curr.append(min(ins, dele, sub))
         prev = curr
-    return prev[-1]
+
+    return float(prev[-1])
 
 
 def _weighted_levenshtein(
-    s1: Sequence[str], s2: Sequence[str], mode: str = "exponential", c: float = 2.0
+    s1: Sequence[str], s2: Sequence[str], mode: str = "exponential"
 ) -> float:
     m, n = len(s1), len(s2)
 
@@ -144,7 +150,7 @@ def _weighted_levenshtein(
         if mode == "linear":
             return base
         elif mode == "constant":
-            return c * base
+            return CONSTANT_MULTIPLIER * base
         elif mode == "exponential":
             return math.exp(base)  # can replace with exp(c * base)
         else:
@@ -174,6 +180,33 @@ def _weighted_levenshtein(
             )
 
     return dp[m][n]
+
+
+def _max_weight_for_mode(mode: str) -> float:
+    if mode == "unweighted":
+        return 1.0
+
+    weighted_mode = mode.removeprefix("weighted_")
+
+    if weighted_mode == "linear":
+        return 1.0
+
+    if weighted_mode == "constant":
+        return CONSTANT_MULTIPLIER
+
+    if weighted_mode == "exponential":
+        return math.exp(1.0)
+
+    raise ValueError(f"Invalid mode: {mode}")
+
+
+def _normalization_denominator(
+    a: Sequence[str],
+    b: Sequence[str],
+    *,
+    mode: str,
+) -> float:
+    return float(max(len(a), len(b))) * _max_weight_for_mode(mode)
 
 
 """
@@ -233,7 +266,7 @@ def compute_trajectory_metrics_for_run(
     total_pairs = 0
     total_jsd = 0.0
     total_norm_edit = 0.0
-
+    mode = "unweighted"
     for ex_id, runs in sorted(by_example.items(), key=lambda kv: kv[0]):
         sequences = [_action_sequence(r) for r in runs]
         probs = _seqs_to_prob_matrix(sequences)
@@ -256,7 +289,7 @@ def compute_trajectory_metrics_for_run(
             jsd_sum += _jsd(probs[i], probs[j])
 
             a, b = sequences[i], sequences[j]
-            denom = max(len(a), len(b))
+            denom = _normalization_denominator(a, b, mode=mode)
             if denom == 0:
                 norm = 0.0
             else:
