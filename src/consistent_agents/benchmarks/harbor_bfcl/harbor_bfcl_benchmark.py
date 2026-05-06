@@ -10,6 +10,7 @@ Total: 3,641 tasks across 13 categories (excludes multi-turn and agentic).
 
 from __future__ import annotations
 
+import random
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
@@ -80,7 +81,7 @@ class HarborBFCLBenchmark(BaseBenchmark):
         self.task_ids = self.adapter.list_available_tasks()
 
         if self.limit:
-            self.task_ids = self.task_ids[: self.limit]
+            self.task_ids = random.sample(self.task_ids, self.limit)
 
         # Pre-generate Harbor task directories
         for idx, source_id in enumerate(self.task_ids):
